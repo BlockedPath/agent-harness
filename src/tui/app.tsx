@@ -180,7 +180,6 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
     <Box flexDirection="column" width="100%" minHeight={24} borderStyle="round" paddingX={1}>
       <Box justifyContent="space-between">
         <Text inverse> harness {session?.id ?? 'loading'} </Text>
-        <Text dimColor>{providerId}/{activeModel}{state.usage ? ` · ${formatTokens(state.usage.totalTokens)} tok` : ''}</Text>
       </Box>
       <Box flexDirection="column" flexGrow={1} minHeight={14} paddingY={1}>
         <Messages />
@@ -221,6 +220,10 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
         <ApprovalModal />
       </Box>
       <InputBar onSubmit={submit} />
+      <Box justifyContent="space-between" paddingX={1}>
+        <Text dimColor>{state.inputDisabled ? 'working…' : 'ready'}</Text>
+        <Text dimColor>{providerId}/{activeModel}{state.usage ? ` · ${formatTokens(state.usage.totalTokens)} tok` : ''}</Text>
+      </Box>
     </Box>
   );
 }
