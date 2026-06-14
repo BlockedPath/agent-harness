@@ -24,4 +24,4 @@
 - Support repository-level config templates.
 - Add export/import for sessions.
 - Add configurable tool allowlists.
-- Add CI for typecheck, tests, and build.
+- ~~Add CI for typecheck, tests, and build.~~ (done)
