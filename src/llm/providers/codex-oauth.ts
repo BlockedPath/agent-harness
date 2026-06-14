@@ -1,8 +1,9 @@
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
-import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ChatMessage, LlmProvider, StreamChunk, ToolDefinition } from '../types.js';
+import { expandHome } from '../../util/fs-paths.js';
+import { firstString, isRecord } from '../../util/objects.js';
+import { toJsonSchema } from '../../util/json-schema.js';
 
 const DEFAULT_CODEX_BASE_URL = 'https://chatgpt.com/backend-api/codex';
 
@@ -160,7 +161,7 @@ function toResponsesTool(tool: ToolDefinition): Record<string, unknown> {
     type: 'function',
     name: tool.name,
     description: tool.description,
-    parameters: zodToJsonSchema(tool.parameters as never) as Record<string, unknown>,
+    parameters: toJsonSchema(tool.parameters),
   };
 }
 
@@ -239,14 +240,3 @@ function readLastRefresh(raw: Record<string, unknown>): number {
 function numberValue(value: unknown): number {
   return typeof value === 'number' ? value : 0;
 }
-
-function firstString(...values: unknown[]): string | null {
-  for (const value of values) if (typeof value === 'string' && value.length > 0) return value;
-  return null;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function expandHome(file: string): string { return file.startsWith('~/') ? path.join(os.homedir(), file.slice(2)) : file; }

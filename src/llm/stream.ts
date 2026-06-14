@@ -6,7 +6,7 @@ export interface AggregatedStream {
   usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
 }
 
-export async function aggregateStream(stream: AsyncIterable<StreamChunk>): Promise<AggregatedStream> {
+export async function aggregateStream(stream: AsyncIterable<StreamChunk>, onContent?: (text: string) => void): Promise<AggregatedStream> {
   let content = '';
   const toolCalls = new Map<string, ToolCall>();
   let anonymousIndex = 0;
@@ -14,7 +14,9 @@ export async function aggregateStream(stream: AsyncIterable<StreamChunk>): Promi
 
   for await (const chunk of stream) {
     if (chunk.type === 'content') {
-      content += chunk.content ?? '';
+      const text = chunk.content ?? '';
+      content += text;
+      onContent?.(text);
       continue;
     }
     if (chunk.type === 'usage') {
@@ -30,5 +32,5 @@ export async function aggregateStream(stream: AsyncIterable<StreamChunk>): Promi
     }
   }
 
-  return { content, toolCalls: [...toolCalls.values()], usage };
+  return { content, toolCalls: [...toolCalls.values()].filter((call) => call.function.name), usage };
 }

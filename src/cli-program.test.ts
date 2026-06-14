@@ -21,7 +21,8 @@ describe('createCliProgram', () => {
     await program.parseAsync(['node', 'harness', '--config', configPath, '--provider', 'openai', '--model', 'gpt-test', '--session', 'session-1'], { from: 'node' });
 
     expect(rendered).toHaveLength(1);
-    expect(rendered[0].props).toMatchObject({
+    const [firstRendered] = rendered;
+    expect(firstRendered?.props).toMatchObject({
       workspaceRoot,
       providerId: 'openai',
       model: 'gpt-test',

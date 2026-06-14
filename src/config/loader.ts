@@ -3,6 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { configSchema, type Config } from './schema.js';
 import { DEFAULT_CODEX_MODEL } from '../llm/models.js';
+import { expandHome } from '../util/fs-paths.js';
+import { isRecord } from '../util/objects.js';
 
 const DEFAULT_CONFIG: Config = {
   defaultProvider: 'codex',
@@ -23,9 +25,7 @@ export async function loadConfig(workspaceRoot: string, explicitPath?: string): 
 }
 
 async function readJson(file: string): Promise<Record<string, unknown>> { try { return JSON.parse(await fs.readFile(expandHome(file), 'utf8')) as Record<string, unknown>; } catch { return {}; } }
-function expandHome(file: string): string { return file.startsWith('~/') ? path.join(os.homedir(), file.slice(2)) : file; }
-function deepMerge<T extends Record<string, unknown>>(...objects: T[]): T { const result: Record<string, unknown> = {}; for (const object of objects) { for (const [key, value] of Object.entries(object)) { result[key] = isObject(result[key]) && isObject(value) ? deepMerge(result[key] as T, value as T) : value; } } return result as T; }
-function isObject(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
+function deepMerge<T extends Record<string, unknown>>(...objects: T[]): T { const result: Record<string, unknown> = {}; for (const object of objects) { for (const [key, value] of Object.entries(object)) { result[key] = isRecord(result[key]) && isRecord(value) ? deepMerge(result[key] as T, value as T) : value; } } return result as T; }
 
 function resolveWorkspaceAuthPaths(workspaceRoot: string, config: Config): Config {
   const providers = Object.fromEntries(Object.entries(config.providers).map(([id, provider]) => {

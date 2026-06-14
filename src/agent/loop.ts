@@ -1,6 +1,7 @@
 import { createTwoFilesPatch } from 'diff';
 import fs from 'node:fs/promises';
-import type { ChatMessage, LlmProvider, StreamChunk, ToolCall } from '../llm/types.js';
+import type { ChatMessage, LlmProvider } from '../llm/types.js';
+import { aggregateStream } from '../llm/stream.js';
 import { buildSystemPrompt } from './prompts.js';
 import type { AgentEvent } from './types.js';
 import type { PermissionConfig } from '../policy/types.js';
@@ -33,7 +34,7 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
 
   for (let iteration = 0; iteration < maxIterations; iteration++) {
     const stream = await options.provider.stream({ model: options.session.model, messages: [system, ...trimMessages(options.session.messages)], tools: toProviderTools(options.tools) });
-    const aggregated = await aggregateAndEmit(stream, options.onEvent);
+    const aggregated = await aggregateStream(stream, (text) => options.onEvent({ type: 'content', text }));
     const assistantMessage: ChatMessage = { role: 'assistant', content: aggregated.content, toolCalls: aggregated.toolCalls.length ? aggregated.toolCalls : undefined };
     options.session.messages.push(assistantMessage);
     await appendMessage(options.session.workspaceRoot, options.session.id, assistantMessage);
@@ -67,31 +68,12 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
   options.onEvent({ type: 'error', message: 'Agent iteration limit reached.' });
 }
 
-async function aggregateAndEmit(stream: AsyncIterable<StreamChunk>, onEvent: (event: AgentEvent) => void): Promise<{ content: string; toolCalls: ToolCall[] }> {
-  let content = '';
-  const toolCalls = new Map<string, ToolCall>();
-  let anonymousIndex = 0;
-  for await (const chunk of stream) {
-    if (chunk.type === 'content') { content += chunk.content ?? ''; onEvent({ type: 'content', text: chunk.content ?? '' }); }
-    if (chunk.type === 'tool_call') {
-      const id = chunk.toolCall?.id ?? `tool-${anonymousIndex++}`;
-      const existing = toolCalls.get(id) ?? { id, type: 'function' as const, function: { name: '', arguments: '' } };
-      existing.function.name += chunk.toolCall?.name ?? '';
-      existing.function.arguments += chunk.toolCall?.arguments ?? '';
-      toolCalls.set(id, existing);
-    }
-  }
-  // Drop any malformed tool call without a name: it cannot be dispatched and, if
-  // stored, would be replayed to the provider as an invalid function_call.
-  return { content, toolCalls: [...toolCalls.values()].filter((call) => call.function.name) };
-}
-
 function parseArgs(raw: string): unknown { try { return JSON.parse(raw || '{}'); } catch { return {}; } }
 function trimMessages(messages: ChatMessage[]): ChatMessage[] { return messages.slice(-40).map((message) => message.role === 'tool' && message.content.length > 4000 ? { ...message, content: `${message.content.slice(0, 4000)}\n[trimmed]` } : message); }
 async function pushToolResult(options: RunTurnOptions, toolCallId: string, result: ToolResult): Promise<void> { const message: ChatMessage = { role: 'tool', toolCallId, content: result.ok ? result.output : `${result.error ?? 'error'}\n${result.output}` }; options.session.messages.push(message); await appendMessage(options.session.workspaceRoot, options.session.id, message); }
 
 async function previewDiff(toolName: string, input: unknown, workspaceRoot: string): Promise<string | undefined> {
-  const data = input as Record<string, string>;
+  const data = input as { path: string; oldString: string; newString: string; content?: string; patch: string };
   try {
     if (toolName === 'replace_string') {
       const abs = resolveWorkspacePath(workspaceRoot, data.path);

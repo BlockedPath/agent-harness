@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { ModelOption } from '../../llm/models.js';
 
@@ -11,7 +11,8 @@ export function ModelPicker({ currentModel, disabled, models, onCancel, onSelect
     if (key.escape || input === 'q') { onCancel(); return; }
     if (key.upArrow) setSelected((current) => Math.max(0, current - 1));
     if (key.downArrow) setSelected((current) => Math.min(models.length - 1, current + 1));
-    if (key.return) onSelect(models[selected].id);
+    const option = models[selected];
+    if (key.return && option) onSelect(option.id);
   });
 
   return (
