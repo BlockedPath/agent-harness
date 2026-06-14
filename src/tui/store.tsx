@@ -19,8 +19,16 @@ export interface ApprovalState {
 
 export type TuiScreen = 'chat' | 'login' | 'models';
 
+export type ErrorSeverity = 'provider' | 'tool' | 'approval';
+export interface ErrorMessage {
+  role: 'error';
+  severity: ErrorSeverity;
+  content: string;
+}
+export type DisplayMessage = ChatMessage | ErrorMessage;
+
 export interface TuiState {
-  messages: ChatMessage[];
+  messages: DisplayMessage[];
   toolCards: ToolCardState[];
   approvalRequest: ApprovalState | null;
   streamingText: string;
@@ -32,6 +40,7 @@ export interface TuiState {
 
 type Action =
   | { type: 'add-message'; message: ChatMessage }
+  | { type: 'add-error'; severity: ErrorSeverity; content: string }
   | { type: 'content'; text: string }
   | { type: 'tool-start'; id: string; name: string; input: unknown }
   | { type: 'tool-done'; id: string; output: string; ok: boolean }
@@ -71,6 +80,8 @@ export function reducer(state: TuiState, action: Action): TuiState {
   switch (action.type) {
     case 'add-message':
       return { ...state, messages: [...state.messages, action.message].slice(-200) };
+    case 'add-error':
+      return { ...state, messages: [...state.messages, { role: 'error' as const, severity: action.severity, content: action.content }].slice(-200) };
     case 'content':
       return { ...state, streamingText: state.streamingText + action.text };
     case 'tool-start':

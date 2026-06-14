@@ -15,3 +15,15 @@ describe('tui reducer — usage', () => {
     expect(reducer(withUsage, { type: 'reset' }).usage).toBeNull();
   });
 });
+
+describe('tui reducer — errors', () => {
+  it('appends a typed error message', () => {
+    const next = reducer(initialState, { type: 'add-error', severity: 'provider', content: 'token invalidated' });
+    expect(next.messages).toEqual([{ role: 'error', severity: 'provider', content: 'token invalidated' }]);
+  });
+
+  it('clears error messages on reset', () => {
+    const withError = reducer(initialState, { type: 'add-error', severity: 'tool', content: 'boom' });
+    expect(reducer(withError, { type: 'reset' }).messages).toEqual([]);
+  });
+});
