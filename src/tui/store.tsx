@@ -17,20 +17,30 @@ export interface ApprovalState {
   resolve: (approved: boolean) => void;
 }
 
-export type TuiScreen = 'chat' | 'login' | 'models';
+export type TuiScreen = 'chat' | 'login' | 'models' | 'sessions';
+
+export type ErrorSeverity = 'provider' | 'tool' | 'approval';
+export interface ErrorMessage {
+  role: 'error';
+  severity: ErrorSeverity;
+  content: string;
+}
+export type DisplayMessage = ChatMessage | ErrorMessage;
 
 export interface TuiState {
-  messages: ChatMessage[];
+  messages: DisplayMessage[];
   toolCards: ToolCardState[];
   approvalRequest: ApprovalState | null;
   streamingText: string;
   inputDisabled: boolean;
   question: { question: string; resolve: (answer: string) => void } | null;
   screen: TuiScreen;
+  usage: { promptTokens: number; completionTokens: number; totalTokens: number } | null;
 }
 
 type Action =
   | { type: 'add-message'; message: ChatMessage }
+  | { type: 'add-error'; severity: ErrorSeverity; content: string }
   | { type: 'content'; text: string }
   | { type: 'tool-start'; id: string; name: string; input: unknown }
   | { type: 'tool-done'; id: string; output: string; ok: boolean }
@@ -38,10 +48,11 @@ type Action =
   | { type: 'question'; question: TuiState['question'] }
   | { type: 'set-disabled'; disabled: boolean }
   | { type: 'set-screen'; screen: TuiScreen }
+  | { type: 'usage'; usage: { promptTokens: number; completionTokens: number; totalTokens: number } }
   | { type: 'reset' }
   | { type: 'flush-stream' };
 
-const initialState: TuiState = {
+export const initialState: TuiState = {
   messages: [],
   toolCards: [],
   approvalRequest: null,
@@ -49,6 +60,7 @@ const initialState: TuiState = {
   inputDisabled: false,
   question: null,
   screen: 'chat',
+  usage: null,
 };
 
 const Context = createContext<{ state: TuiState; dispatch: React.Dispatch<Action> } | null>(null);
@@ -64,10 +76,12 @@ export function useTuiStore() {
   return value;
 }
 
-function reducer(state: TuiState, action: Action): TuiState {
+export function reducer(state: TuiState, action: Action): TuiState {
   switch (action.type) {
     case 'add-message':
       return { ...state, messages: [...state.messages, action.message].slice(-200) };
+    case 'add-error':
+      return { ...state, messages: [...state.messages, { role: 'error' as const, severity: action.severity, content: action.content }].slice(-200) };
     case 'content':
       return { ...state, streamingText: state.streamingText + action.text };
     case 'tool-start':
@@ -82,6 +96,15 @@ function reducer(state: TuiState, action: Action): TuiState {
       return { ...state, inputDisabled: action.disabled };
     case 'set-screen':
       return { ...state, screen: action.screen };
+    case 'usage':
+      return {
+        ...state,
+        usage: {
+          promptTokens: (state.usage?.promptTokens ?? 0) + action.usage.promptTokens,
+          completionTokens: (state.usage?.completionTokens ?? 0) + action.usage.completionTokens,
+          totalTokens: (state.usage?.totalTokens ?? 0) + action.usage.totalTokens,
+        },
+      };
     case 'reset':
       return { ...initialState };
     case 'flush-stream':

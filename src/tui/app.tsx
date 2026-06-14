@@ -4,8 +4,9 @@ import type { Config } from '../config/schema.js';
 import { createProvider } from '../llm/registry.js';
 import { CODEX_MODELS } from '../llm/models.js';
 import { loginWithCodexBrowser } from '../llm/providers/codex-login.js';
+import { CodexAuthError } from '../llm/providers/codex-oauth.js';
 import { runTurn } from '../agent/loop.js';
-import { createSession, loadSession, setSessionModel } from '../session/store.js';
+import { createSession, listSessionSummaries, loadSession, setSessionModel, type SessionSummary } from '../session/store.js';
 import { parseCommand } from './commands.js';
 import type { Session } from '../session/types.js';
 import { ALL_TOOLS } from '../tools/registry.js';
@@ -13,6 +14,7 @@ import { ApprovalModal } from './components/approval-modal.js';
 import { InputBar } from './components/input-bar.js';
 import { LoginProviders } from './components/login-providers.js';
 import { ModelPicker } from './components/model-picker.js';
+import { SessionPicker } from './components/session-picker.js';
 import { Messages } from './components/messages.js';
 import { ToolCard } from './components/tool-card.js';
 import { TuiStoreProvider, useTuiStore } from './store.js';
@@ -34,11 +36,58 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
   const { exit } = useApp();
   const [session, setSession] = useState<Session | null>(null);
   const [activeModel, setActiveModel] = useState(model);
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const running = useRef(false);
+  const pendingRetry = useRef<string | null>(null);
 
   useEffect(() => {
     void (async () => setSession(sessionId ? await loadSession(workspaceRoot, sessionId) : await createSession(workspaceRoot, providerId, model)))();
   }, [workspaceRoot, providerId, model, sessionId]);
+
+  const runAgentTurn = useCallback((message: string) => {
+    if (!session || running.current) return;
+    running.current = true;
+    dispatch({ type: 'add-message', message: { role: 'user', content: message } });
+    dispatch({ type: 'set-disabled', disabled: true });
+
+    void (async () => {
+      const provider = await createProvider({ ...config, defaultProvider: providerId });
+      await runTurn({
+        session,
+        provider,
+        tools: ALL_TOOLS,
+        config: { permissions: config.permissions },
+        userMessage: message,
+        onEvent(event) {
+          if (event.type === 'content') dispatch({ type: 'content', text: event.text });
+          if (event.type === 'tool-start') dispatch({ type: 'tool-start', id: event.toolCallId, name: event.name, input: event.input });
+          if (event.type === 'tool-done') dispatch({ type: 'tool-done', id: event.toolCallId, output: event.result.output || event.result.error || '', ok: event.result.ok });
+          if (event.type === 'approval-request') dispatch({ type: 'approval', request: event });
+          if (event.type === 'question') dispatch({ type: 'question', question: event });
+          if (event.type === 'usage') dispatch({ type: 'usage', usage: event.usage });
+          if (event.type === 'error') dispatch({ type: 'add-error', severity: 'provider', content: event.message });
+          if (event.type === 'done') {
+            dispatch({ type: 'flush-stream' });
+            dispatch({ type: 'set-disabled', disabled: false });
+            running.current = false;
+          }
+        },
+      });
+    })().catch((error: unknown) => {
+      running.current = false;
+      dispatch({ type: 'set-disabled', disabled: false });
+      if (isAuthError(error)) {
+        // Auth failed mid-turn: stash the message, surface the error, and guide
+        // the user to re-login. The turn is retried automatically after sign-in.
+        pendingRetry.current = message;
+        dispatch({ type: 'add-error', severity: 'provider', content: error instanceof Error ? error.message : String(error) });
+        dispatch({ type: 'add-message', message: { role: 'assistant', content: 'Sign in again to continue — choose a provider below. Your last message will be retried automatically.' } });
+        dispatch({ type: 'set-screen', screen: 'login' });
+      } else {
+        dispatch({ type: 'add-error', severity: 'provider', content: error instanceof Error ? error.message : String(error) });
+      }
+    });
+  }, [session, config, providerId, dispatch]);
 
   const startCodexLogin = useCallback(() => {
     if (running.current) return;
@@ -50,15 +99,21 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
       .then((credentialsPath) => {
         dispatch({ type: 'add-message', message: { role: 'assistant', content: `Codex login complete. Credentials saved at ${credentialsPath}.` } });
         dispatch({ type: 'set-screen', screen: 'chat' });
+        dispatch({ type: 'set-disabled', disabled: false });
+        running.current = false;
+        const retry = pendingRetry.current;
+        pendingRetry.current = null;
+        if (retry) {
+          dispatch({ type: 'add-message', message: { role: 'assistant', content: 'Re-authenticated. Retrying your last message…' } });
+          runAgentTurn(retry);
+        }
       })
       .catch((error: unknown) => {
-        dispatch({ type: 'add-message', message: { role: 'assistant', content: `Codex login failed: ${error instanceof Error ? error.message : String(error)}` } });
-      })
-      .finally(() => {
+        dispatch({ type: 'add-error', severity: 'provider', content: `Codex login failed: ${error instanceof Error ? error.message : String(error)}` });
         dispatch({ type: 'set-disabled', disabled: false });
         running.current = false;
       });
-  }, [config.providers.codex?.oauthCredentialsPath, config.providers.codex?.oauthSourceCredentialsPath, dispatch]);
+  }, [config.providers.codex?.oauthCredentialsPath, config.providers.codex?.oauthSourceCredentialsPath, dispatch, runAgentTurn]);
 
   const applyModelChange = useCallback((newModel: string, notice: string) => {
     setActiveModel(newModel);
@@ -70,10 +125,31 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
     dispatch({ type: 'add-message', message: { role: 'assistant', content: notice } });
   }, [dispatch]);
 
+  const resumeSession = useCallback((id: string) => {
+    void (async () => {
+      const loaded = await loadSession(workspaceRoot, id);
+      dispatch({ type: 'reset' });
+      setSession(loaded);
+      setActiveModel(loaded.model);
+      for (const message of loaded.messages) dispatch({ type: 'add-message', message });
+      dispatch({ type: 'add-message', message: { role: 'assistant', content: `Resumed session ${loaded.id} (${loaded.messages.length} messages).` } });
+    })().catch((error: unknown) => {
+      dispatch({ type: 'set-screen', screen: 'chat' });
+      dispatch({ type: 'add-error', severity: 'provider', content: `Could not resume session: ${error instanceof Error ? error.message : String(error)}` });
+    });
+  }, [workspaceRoot, dispatch]);
+
   const submit = useCallback((message: string) => {
     const action = parseCommand(message, CODEX_MODELS);
     if (action.kind === 'open-screen') {
-      dispatch({ type: 'set-screen', screen: action.screen });
+      if (action.screen === 'sessions') {
+        void listSessionSummaries(workspaceRoot).then((summaries) => {
+          setSessions(summaries);
+          dispatch({ type: 'set-screen', screen: 'sessions' });
+        });
+      } else {
+        dispatch({ type: 'set-screen', screen: action.screen });
+      }
       return;
     }
     if (action.kind === 'notice') {
@@ -97,46 +173,14 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
       });
       return;
     }
-    message = action.text;
-    if (!session || running.current) return;
-    running.current = true;
-    dispatch({ type: 'add-message', message: { role: 'user', content: message } });
-    dispatch({ type: 'set-disabled', disabled: true });
-
-    void (async () => {
-      const provider = await createProvider({ ...config, defaultProvider: providerId });
-      await runTurn({
-        session,
-        provider,
-        tools: ALL_TOOLS,
-        config: { permissions: config.permissions },
-        userMessage: message,
-        onEvent(event) {
-          if (event.type === 'content') dispatch({ type: 'content', text: event.text });
-          if (event.type === 'tool-start') dispatch({ type: 'tool-start', id: event.toolCallId, name: event.name, input: event.input });
-          if (event.type === 'tool-done') dispatch({ type: 'tool-done', id: event.toolCallId, output: event.result.output || event.result.error || '', ok: event.result.ok });
-          if (event.type === 'approval-request') dispatch({ type: 'approval', request: event });
-          if (event.type === 'question') dispatch({ type: 'question', question: event });
-          if (event.type === 'error') dispatch({ type: 'add-message', message: { role: 'assistant', content: `Error: ${event.message}` } });
-          if (event.type === 'done') {
-            dispatch({ type: 'flush-stream' });
-            dispatch({ type: 'set-disabled', disabled: false });
-            running.current = false;
-          }
-        },
-      });
-    })().catch((error: unknown) => {
-      dispatch({ type: 'add-message', message: { role: 'assistant', content: `Error: ${error instanceof Error ? error.message : String(error)}` } });
-      dispatch({ type: 'set-disabled', disabled: false });
-      running.current = false;
-    });
-  }, [session, config, providerId, dispatch, applyModelChange, exit, workspaceRoot, activeModel]);
+    runAgentTurn(action.text);
+  }, [dispatch, applyModelChange, exit, runAgentTurn, workspaceRoot, providerId, activeModel]);
 
   return (
     <Box flexDirection="column" width="100%" minHeight={24} borderStyle="round" paddingX={1}>
       <Box justifyContent="space-between">
         <Text inverse> harness {session?.id ?? 'loading'} </Text>
-        <Text dimColor>{providerId}/{activeModel}</Text>
+        <Text dimColor>{providerId}/{activeModel}{state.usage ? ` · ${formatTokens(state.usage.totalTokens)} tok` : ''}</Text>
       </Box>
       <Box flexDirection="column" flexGrow={1} minHeight={14} paddingY={1}>
         <Messages />
@@ -161,10 +205,32 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
             }}
           />
         )}
+        {state.screen === 'sessions' && (
+          <SessionPicker
+            disabled={state.inputDisabled}
+            sessions={sessions}
+            currentId={session?.id}
+            onCancel={() => dispatch({ type: 'set-screen', screen: 'chat' })}
+            onSelect={(id) => {
+              dispatch({ type: 'set-screen', screen: 'chat' });
+              resumeSession(id);
+            }}
+          />
+        )}
         {state.toolCards.map((card) => <ToolCard key={card.id} card={card} />)}
         <ApprovalModal />
       </Box>
       <InputBar onSubmit={submit} />
     </Box>
   );
+}
+
+function formatTokens(total: number): string {
+  return total >= 1000 ? `${(total / 1000).toFixed(1)}k` : String(total);
+}
+
+export function isAuthError(error: unknown): boolean {
+  if (error instanceof CodexAuthError) return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return /credential|sign in|log ?in|authenticat|token has been invalidated|missing .* token/i.test(message);
 }
