@@ -55,4 +55,27 @@ export async function listSessions(workspaceRoot: string): Promise<string[]> {
   } catch { return []; }
 }
 
+export interface SessionSummary {
+  id: string;
+  createdAt: string;
+  model: string;
+  messageCount: number;
+  preview: string;
+}
+
+export async function listSessionSummaries(workspaceRoot: string, limit = 20): Promise<SessionSummary[]> {
+  const ids = (await listSessions(workspaceRoot)).slice(0, limit);
+  const summaries = await Promise.all(ids.map(async (id): Promise<SessionSummary | null> => {
+    try {
+      const session = await loadSession(workspaceRoot, id);
+      const firstUser = session.messages.find((message) => message.role === 'user');
+      const preview = firstUser ? firstUser.content.replace(/\s+/g, ' ').trim().slice(0, 60) : '(no messages)';
+      return { id, createdAt: session.createdAt, model: session.model, messageCount: session.messages.length, preview };
+    } catch {
+      return null;
+    }
+  }));
+  return summaries.filter((summary): summary is SessionSummary => summary !== null);
+}
+
 function sessionDir(workspaceRoot: string): string { return path.join(workspaceRoot, '.harness', 'sessions'); }

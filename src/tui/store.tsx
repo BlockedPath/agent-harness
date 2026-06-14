@@ -17,7 +17,7 @@ export interface ApprovalState {
   resolve: (approved: boolean) => void;
 }
 
-export type TuiScreen = 'chat' | 'login' | 'models';
+export type TuiScreen = 'chat' | 'login' | 'models' | 'sessions';
 
 export type ErrorSeverity = 'provider' | 'tool' | 'approval';
 export interface ErrorMessage {

@@ -5,7 +5,7 @@ import type { ModelOption } from '../llm/models.js';
  * and side effects so command handling can be unit tested in isolation.
  */
 export type CommandAction =
-  | { kind: 'open-screen'; screen: 'login' | 'models' }
+  | { kind: 'open-screen'; screen: 'login' | 'models' | 'sessions' }
   | { kind: 'set-model'; model: string; notice: string }
   | { kind: 'notice'; notice: string }
   | { kind: 'clear' }
@@ -23,6 +23,7 @@ export const COMMANDS: CommandSpec[] = [
   { name: '/help', summary: 'List available commands.' },
   { name: '/login', summary: 'Open provider login choices.' },
   { name: '/models', aliases: ['/model'], summary: 'Open the model picker, or pass an id to switch directly.' },
+  { name: '/resume', aliases: ['/sessions'], summary: 'List and resume a previous session.' },
   { name: '/clear', aliases: ['/new'], summary: 'Start a fresh session and clear the screen.' },
   { name: '/exit', aliases: ['/quit'], summary: 'Exit the harness.' },
 ];
@@ -38,13 +39,15 @@ function matches(trimmed: string, command: CommandSpec | undefined): boolean {
   return names.some((name) => trimmed === name || trimmed.startsWith(`${name} `));
 }
 
+const byName = (name: string): CommandSpec | undefined => COMMANDS.find((command) => command.name === name);
+
 export function parseCommand(input: string, models: ModelOption[]): CommandAction {
   const trimmed = input.trim();
 
-  if (matches(trimmed, COMMANDS[0])) return { kind: 'notice', notice: HELP_TEXT };
-  if (matches(trimmed, COMMANDS[1])) return { kind: 'open-screen', screen: 'login' };
+  if (matches(trimmed, byName('/help'))) return { kind: 'notice', notice: HELP_TEXT };
+  if (matches(trimmed, byName('/login'))) return { kind: 'open-screen', screen: 'login' };
 
-  if (matches(trimmed, COMMANDS[2])) {
+  if (matches(trimmed, byName('/models'))) {
     const requested = trimmed.split(/\s+/)[1];
     if (!requested) return { kind: 'open-screen', screen: 'models' };
     const option = models.find((candidate) => candidate.id === requested);
@@ -52,8 +55,9 @@ export function parseCommand(input: string, models: ModelOption[]): CommandActio
     return { kind: 'notice', notice: `Unknown model: ${requested}. Type /models to choose one.` };
   }
 
-  if (matches(trimmed, COMMANDS[3])) return { kind: 'clear' };
-  if (matches(trimmed, COMMANDS[4])) return { kind: 'exit' };
+  if (matches(trimmed, byName('/resume'))) return { kind: 'open-screen', screen: 'sessions' };
+  if (matches(trimmed, byName('/clear'))) return { kind: 'clear' };
+  if (matches(trimmed, byName('/exit'))) return { kind: 'exit' };
 
   if (trimmed.startsWith('/')) {
     return { kind: 'notice', notice: `Unknown command: ${trimmed.split(/\s+/)[0]}. Type /help for a list.` };

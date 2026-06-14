@@ -6,7 +6,7 @@ import { CODEX_MODELS } from '../llm/models.js';
 import { loginWithCodexBrowser } from '../llm/providers/codex-login.js';
 import { CodexAuthError } from '../llm/providers/codex-oauth.js';
 import { runTurn } from '../agent/loop.js';
-import { createSession, loadSession, setSessionModel } from '../session/store.js';
+import { createSession, listSessionSummaries, loadSession, setSessionModel, type SessionSummary } from '../session/store.js';
 import { parseCommand } from './commands.js';
 import type { Session } from '../session/types.js';
 import { ALL_TOOLS } from '../tools/registry.js';
@@ -14,6 +14,7 @@ import { ApprovalModal } from './components/approval-modal.js';
 import { InputBar } from './components/input-bar.js';
 import { LoginProviders } from './components/login-providers.js';
 import { ModelPicker } from './components/model-picker.js';
+import { SessionPicker } from './components/session-picker.js';
 import { Messages } from './components/messages.js';
 import { ToolCard } from './components/tool-card.js';
 import { TuiStoreProvider, useTuiStore } from './store.js';
@@ -35,6 +36,7 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
   const { exit } = useApp();
   const [session, setSession] = useState<Session | null>(null);
   const [activeModel, setActiveModel] = useState(model);
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const running = useRef(false);
   const pendingRetry = useRef<string | null>(null);
 
@@ -123,10 +125,31 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
     dispatch({ type: 'add-message', message: { role: 'assistant', content: notice } });
   }, [dispatch]);
 
+  const resumeSession = useCallback((id: string) => {
+    void (async () => {
+      const loaded = await loadSession(workspaceRoot, id);
+      dispatch({ type: 'reset' });
+      setSession(loaded);
+      setActiveModel(loaded.model);
+      for (const message of loaded.messages) dispatch({ type: 'add-message', message });
+      dispatch({ type: 'add-message', message: { role: 'assistant', content: `Resumed session ${loaded.id} (${loaded.messages.length} messages).` } });
+    })().catch((error: unknown) => {
+      dispatch({ type: 'set-screen', screen: 'chat' });
+      dispatch({ type: 'add-error', severity: 'provider', content: `Could not resume session: ${error instanceof Error ? error.message : String(error)}` });
+    });
+  }, [workspaceRoot, dispatch]);
+
   const submit = useCallback((message: string) => {
     const action = parseCommand(message, CODEX_MODELS);
     if (action.kind === 'open-screen') {
-      dispatch({ type: 'set-screen', screen: action.screen });
+      if (action.screen === 'sessions') {
+        void listSessionSummaries(workspaceRoot).then((summaries) => {
+          setSessions(summaries);
+          dispatch({ type: 'set-screen', screen: 'sessions' });
+        });
+      } else {
+        dispatch({ type: 'set-screen', screen: action.screen });
+      }
       return;
     }
     if (action.kind === 'notice') {
@@ -179,6 +202,18 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
             onSelect={(selectedModel) => {
               applyModelChange(selectedModel, `Model changed to ${selectedModel}.`);
               dispatch({ type: 'set-screen', screen: 'chat' });
+            }}
+          />
+        )}
+        {state.screen === 'sessions' && (
+          <SessionPicker
+            disabled={state.inputDisabled}
+            sessions={sessions}
+            currentId={session?.id}
+            onCancel={() => dispatch({ type: 'set-screen', screen: 'chat' })}
+            onSelect={(id) => {
+              dispatch({ type: 'set-screen', screen: 'chat' });
+              resumeSession(id);
             }}
           />
         )}

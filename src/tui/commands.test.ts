@@ -37,6 +37,11 @@ describe('parseCommand', () => {
     expect(HELP_TEXT).toContain('/exit');
   });
 
+  it('opens the sessions screen for /resume and its /sessions alias', () => {
+    expect(parseCommand('/resume', CODEX_MODELS)).toEqual({ kind: 'open-screen', screen: 'sessions' });
+    expect(parseCommand('/sessions', CODEX_MODELS)).toEqual({ kind: 'open-screen', screen: 'sessions' });
+  });
+
   it('clears the session for /clear and its /new alias', () => {
     expect(parseCommand('/clear', CODEX_MODELS)).toEqual({ kind: 'clear' });
     expect(parseCommand('/new', CODEX_MODELS)).toEqual({ kind: 'clear' });
