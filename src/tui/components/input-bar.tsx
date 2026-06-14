@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import { useTuiStore } from '../store.js';
 
@@ -14,9 +14,18 @@ const SLASH_COMMANDS: SlashCommand[] = [
 
 export function InputBar({ onSubmit }: { onSubmit: (value: string) => void }) {
   const [value, setValue] = useState('');
+  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const { exit } = useApp();
   const { state, dispatch } = useTuiStore();
   const commandPreview = value.startsWith('/') ? SLASH_COMMANDS.filter((command) => command.name.startsWith(value)) : [];
+
+  useEffect(() => {
+    setSelectedCommandIndex(0);
+  }, [value]);
+
+  useEffect(() => {
+    if (selectedCommandIndex >= commandPreview.length) setSelectedCommandIndex(Math.max(0, commandPreview.length - 1));
+  }, [commandPreview.length, selectedCommandIndex]);
 
   useInput((input, key) => {
     if (key.ctrl && input === 'c') exit();
@@ -32,8 +41,20 @@ export function InputBar({ onSubmit }: { onSubmit: (value: string) => void }) {
       return;
     }
     if (state.inputDisabled) return;
+    if (commandPreview.length > 0 && key.upArrow) {
+      setSelectedCommandIndex((current) => (current - 1 + commandPreview.length) % commandPreview.length);
+      return;
+    }
+    if (commandPreview.length > 0 && key.downArrow) {
+      setSelectedCommandIndex((current) => (current + 1) % commandPreview.length);
+      return;
+    }
+    if (commandPreview.length > 0 && key.tab) {
+      setValue(commandPreview[selectedCommandIndex].name);
+      return;
+    }
     if (key.return && value.trim()) {
-      onSubmit(value.trim());
+      onSubmit(commandPreview.length > 0 ? commandPreview[selectedCommandIndex].name : value.trim());
       setValue('');
       return;
     }
@@ -45,10 +66,10 @@ export function InputBar({ onSubmit }: { onSubmit: (value: string) => void }) {
     <Box flexDirection="column">
       {commandPreview.length > 0 ? (
         <Box borderStyle="single" borderColor="gray" flexDirection="column" paddingX={1}>
-          {commandPreview.map((command) => (
+          {commandPreview.map((command, index) => (
             <Text key={command.name}>
-              <Text color="green">{command.name}</Text>
-              <Text dimColor> - {command.description}</Text>
+              <Text color="green" inverse={index === selectedCommandIndex}>{command.name}</Text>
+              <Text dimColor={index !== selectedCommandIndex}> - {command.description}</Text>
             </Text>
           ))}
         </Box>
