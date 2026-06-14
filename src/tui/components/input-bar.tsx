@@ -1,23 +1,18 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import { useTuiStore } from '../store.js';
+import { COMMANDS } from '../commands.js';
 
-interface SlashCommand {
-  name: string;
-  description: string;
-}
-
-const SLASH_COMMANDS: SlashCommand[] = [
-  { name: '/login', description: 'Sign in to a provider with browser OAuth.' },
-  { name: '/models', description: 'Choose the active Codex model.' },
-];
+const SLASH_COMMANDS = COMMANDS.map((command) => ({ name: command.name, description: command.summary }));
 
 export function InputBar({ onSubmit }: { onSubmit: (value: string) => void }) {
   const [value, setValue] = useState('');
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const { exit } = useApp();
   const { state, dispatch } = useTuiStore();
-  const commandPreview = value.startsWith('/') ? SLASH_COMMANDS.filter((command) => command.name.startsWith(value)) : [];
+  const commandPreview = value.startsWith('/')
+    ? SLASH_COMMANDS.filter((command) => command.name.startsWith(value))
+    : [];
 
   useEffect(() => {
     setSelectedCommandIndex(0);
@@ -49,12 +44,13 @@ export function InputBar({ onSubmit }: { onSubmit: (value: string) => void }) {
       setSelectedCommandIndex((current) => (current + 1) % commandPreview.length);
       return;
     }
-    if (commandPreview.length > 0 && key.tab) {
-      setValue(commandPreview[selectedCommandIndex].name);
+    const selectedCommand = commandPreview[selectedCommandIndex];
+    if (commandPreview.length > 0 && key.tab && selectedCommand) {
+      setValue(selectedCommand.name);
       return;
     }
     if (key.return && value.trim()) {
-      onSubmit(commandPreview.length > 0 ? commandPreview[selectedCommandIndex].name : value.trim());
+      onSubmit(commandPreview.length > 0 && selectedCommand ? selectedCommand.name : value.trim());
       setValue('');
       return;
     }

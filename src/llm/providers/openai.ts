@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
-import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ChatMessage, LlmProvider, StreamChunk, ToolDefinition } from '../types.js';
+import { toJsonSchema } from '../../util/json-schema.js';
 
 export class OpenAiProvider implements LlmProvider {
   id = 'openai';
@@ -14,13 +14,13 @@ export class OpenAiProvider implements LlmProvider {
   async stream(options: { model: string; messages: ChatMessage[]; tools: ToolDefinition[]; temperature?: number; maxTokens?: number }): Promise<AsyncIterable<StreamChunk>> {
     const response = await this.client.chat.completions.create({
       model: options.model,
-      messages: options.messages.map(toOpenAiMessage) as unknown as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+      messages: options.messages.map(toOpenAiMessage),
       tools: options.tools.map((tool) => ({
         type: 'function' as const,
         function: {
           name: tool.name,
           description: tool.description,
-          parameters: zodToJsonSchema(tool.parameters as never) as Record<string, unknown>,
+          parameters: toJsonSchema(tool.parameters),
         },
       })),
       temperature: options.temperature,
@@ -47,7 +47,12 @@ export class OpenAiProvider implements LlmProvider {
   }
 }
 
-function toOpenAiMessage(message: ChatMessage): Record<string, unknown> {
-  if (message.role === 'tool') return { role: 'tool', tool_call_id: message.toolCallId, content: message.content };
-  return { role: message.role, content: message.content, tool_calls: message.toolCalls };
+function toOpenAiMessage(message: ChatMessage): OpenAI.Chat.Completions.ChatCompletionMessageParam {
+  if (message.role === 'tool') return { role: 'tool', tool_call_id: message.toolCallId ?? '', content: message.content };
+  if (message.role === 'assistant') {
+    const toolCalls = message.toolCalls?.map((call) => ({ id: call.id, type: 'function' as const, function: call.function }));
+    return { role: 'assistant', content: message.content, ...(toolCalls?.length ? { tool_calls: toolCalls } : {}) };
+  }
+  if (message.role === 'system') return { role: 'system', content: message.content };
+  return { role: 'user', content: message.content };
 }

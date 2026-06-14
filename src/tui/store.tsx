@@ -38,6 +38,7 @@ type Action =
   | { type: 'question'; question: TuiState['question'] }
   | { type: 'set-disabled'; disabled: boolean }
   | { type: 'set-screen'; screen: TuiScreen }
+  | { type: 'reset' }
   | { type: 'flush-stream' };
 
 const initialState: TuiState = {
@@ -81,6 +82,8 @@ function reducer(state: TuiState, action: Action): TuiState {
       return { ...state, inputDisabled: action.disabled };
     case 'set-screen':
       return { ...state, screen: action.screen };
+    case 'reset':
+      return { ...initialState };
     case 'flush-stream':
       return state.streamingText ? { ...state, messages: [...state.messages, { role: 'assistant' as const, content: state.streamingText }].slice(-200), streamingText: '' } : state;
   }

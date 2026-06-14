@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 
 interface ProviderOption {
@@ -19,7 +19,8 @@ export function LoginProviders({ disabled, onCancel, onSelect }: { disabled: boo
     if (key.escape || input === 'q') { onCancel(); return; }
     if (key.upArrow) setSelected((current) => Math.max(0, current - 1));
     if (key.downArrow) setSelected((current) => Math.min(PROVIDERS.length - 1, current + 1));
-    if (key.return) onSelect(PROVIDERS[selected].id);
+    const option = PROVIDERS[selected];
+    if (key.return && option) onSelect(option.id);
   });
 
   return (

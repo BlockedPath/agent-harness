@@ -13,8 +13,8 @@ describe('aggregateStream', () => {
     }
     const result = await aggregateStream(chunks());
     expect(result.content).toBe('hi there');
-    expect(result.toolCalls[0].function.name).toBe('read_file');
-    expect(result.toolCalls[0].function.arguments).toBe('{"path":"a.ts"}');
+    expect(result.toolCalls[0]?.function.name).toBe('read_file');
+    expect(result.toolCalls[0]?.function.arguments).toBe('{"path":"a.ts"}');
     expect(result.usage?.totalTokens).toBe(3);
   });
 });

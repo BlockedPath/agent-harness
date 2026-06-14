@@ -18,6 +18,21 @@ npm run dev -- /path/to/workspace
 
 If no workspace is supplied, the current directory is used.
 
+## Non-Interactive Mode
+
+Run a single prompt without the TUI and print the assistant's reply to stdout. Tool
+activity and diagnostics go to stderr, so stdout stays clean for piping.
+
+```sh
+npm run dev -- . --print "summarize the project structure"
+harness -p "fix the failing test" --yes        # auto-approve tools that would prompt
+harness -p "continue" --session <id>            # resume an existing session
+```
+
+Without `--yes`, any tool that would normally require approval is denied (and noted on
+stderr), since there is no interactive prompt. The command exits non-zero if the agent
+reports an error.
+
 ## Login And Providers
 
 The default provider is `codex` with Codex OAuth credentials. By default, the harness reads existing Codex credentials from `~/.codex/auth.json` and syncs newer source credentials into `.harness/auth/codex.json` when needed.
@@ -90,7 +105,10 @@ npm run lint                     # run ESLint
 Useful TUI commands:
 
 ```text
+/help               # list available commands
 /login              # open provider login choices
-/models             # open the Codex model picker
-/models gpt-5.5     # switch directly to a known Codex model
+/models             # open the model picker (alias: /model)
+/models gpt-5.5     # switch directly to a known model
+/clear              # start a fresh session and clear the screen (alias: /new)
+/exit               # exit the harness (alias: /quit)
 ```

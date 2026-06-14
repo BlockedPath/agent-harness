@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ChatMessage, LlmProvider, StreamChunk, ToolDefinition } from '../types.js';
+import { toJsonSchema } from '../../util/json-schema.js';
 
 export class AnthropicProvider implements LlmProvider {
   id = 'anthropic';
@@ -20,7 +20,7 @@ export class AnthropicProvider implements LlmProvider {
       temperature: options.temperature,
       system,
       messages,
-      tools: options.tools.map((tool) => ({ name: tool.name, description: tool.description, input_schema: zodToJsonSchema(tool.parameters as never) as Anthropic.Tool.InputSchema })),
+      tools: options.tools.map((tool) => ({ name: tool.name, description: tool.description, input_schema: toJsonSchema(tool.parameters) as Anthropic.Tool.InputSchema })),
     });
 
     async function* normalize(): AsyncIterable<StreamChunk> {
