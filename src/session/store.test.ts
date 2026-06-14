@@ -8,6 +8,11 @@ async function makeWorkspace(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'harness-session-'));
 }
 
+async function setMtime(workspaceRoot: string, sessionId: string, epochSeconds: number): Promise<void> {
+  const file = path.join(workspaceRoot, '.harness', 'sessions', `${sessionId}.jsonl`);
+  await fs.utimes(file, epochSeconds, epochSeconds);
+}
+
 describe('session store resume', () => {
   it('round-trips creation and messages through loadSession', async () => {
     const workspaceRoot = await makeWorkspace();
@@ -46,8 +51,10 @@ describe('session store resume', () => {
     const workspaceRoot = await makeWorkspace();
     const first = await createSession(workspaceRoot, 'codex', 'gpt-5.5');
     const second = await createSession(workspaceRoot, 'codex', 'gpt-5.5');
-    // Touch the first session after the second so it becomes the newest by mtime.
-    await appendMessage(workspaceRoot, first.id, { role: 'user', content: 'bump' });
+    // Set explicit mtimes so ordering is deterministic regardless of filesystem
+    // timestamp granularity: make `first` strictly newer than `second`.
+    await setMtime(workspaceRoot, second.id, 1000);
+    await setMtime(workspaceRoot, first.id, 2000);
 
     const ids = await listSessions(workspaceRoot);
     expect(ids).toContain(first.id);
@@ -82,6 +89,8 @@ describe('listSessionSummaries', () => {
     const older = await createSession(workspaceRoot, 'codex', 'gpt-5.5');
     const newer = await createSession(workspaceRoot, 'codex', 'gpt-5.5');
     await appendMessage(workspaceRoot, newer.id, { role: 'user', content: 'newest' });
+    await setMtime(workspaceRoot, older.id, 1000);
+    await setMtime(workspaceRoot, newer.id, 2000);
 
     const summaries = await listSessionSummaries(workspaceRoot, 1);
     expect(summaries).toHaveLength(1);
