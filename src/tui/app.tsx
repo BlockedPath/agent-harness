@@ -117,6 +117,7 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
           if (event.type === 'tool-done') dispatch({ type: 'tool-done', id: event.toolCallId, output: event.result.output || event.result.error || '', ok: event.result.ok });
           if (event.type === 'approval-request') dispatch({ type: 'approval', request: event });
           if (event.type === 'question') dispatch({ type: 'question', question: event });
+          if (event.type === 'usage') dispatch({ type: 'usage', usage: event.usage });
           if (event.type === 'error') dispatch({ type: 'add-message', message: { role: 'assistant', content: `Error: ${event.message}` } });
           if (event.type === 'done') {
             dispatch({ type: 'flush-stream' });
@@ -136,7 +137,7 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
     <Box flexDirection="column" width="100%" minHeight={24} borderStyle="round" paddingX={1}>
       <Box justifyContent="space-between">
         <Text inverse> harness {session?.id ?? 'loading'} </Text>
-        <Text dimColor>{providerId}/{activeModel}</Text>
+        <Text dimColor>{providerId}/{activeModel}{state.usage ? ` · ${formatTokens(state.usage.totalTokens)} tok` : ''}</Text>
       </Box>
       <Box flexDirection="column" flexGrow={1} minHeight={14} paddingY={1}>
         <Messages />
@@ -167,4 +168,8 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
       <InputBar onSubmit={submit} />
     </Box>
   );
+}
+
+function formatTokens(total: number): string {
+  return total >= 1000 ? `${(total / 1000).toFixed(1)}k` : String(total);
 }

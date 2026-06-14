@@ -68,6 +68,9 @@ export async function runHeadless(options: RunHeadlessOptions): Promise<void> {
           writeErr(`[skipped] agent asked "${event.question}" but no input is available in non-interactive mode.\n`);
           event.resolve('No answer available; running non-interactively.');
           break;
+        case 'usage':
+          writeErr(`[usage] ${event.usage.totalTokens} tokens (${event.usage.promptTokens} in / ${event.usage.completionTokens} out)\n`);
+          break;
         case 'error':
           errorMessage = event.message;
           break;

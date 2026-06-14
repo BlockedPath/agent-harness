@@ -35,6 +35,7 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
   for (let iteration = 0; iteration < maxIterations; iteration++) {
     const stream = await options.provider.stream({ model: options.session.model, messages: [system, ...trimMessages(options.session.messages)], tools: toProviderTools(options.tools) });
     const aggregated = await aggregateStream(stream, (text) => options.onEvent({ type: 'content', text }));
+    if (aggregated.usage) options.onEvent({ type: 'usage', usage: aggregated.usage });
     const assistantMessage: ChatMessage = { role: 'assistant', content: aggregated.content, toolCalls: aggregated.toolCalls.length ? aggregated.toolCalls : undefined };
     options.session.messages.push(assistantMessage);
     await appendMessage(options.session.workspaceRoot, options.session.id, assistantMessage);
