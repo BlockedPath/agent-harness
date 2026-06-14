@@ -20,7 +20,17 @@ export const searchFilesTool: ToolDefinitionFull<z.infer<typeof schema>> = {
   },
 };
 
-async function commandExists(command: string): Promise<boolean> { try { await access(`/opt/homebrew/bin/${command}`); return true; } catch {} try { await access(`/usr/bin/${command}`); return true; } catch { return false; } }
+async function commandExists(command: string): Promise<boolean> {
+  for (const candidate of [`/opt/homebrew/bin/${command}`, `/usr/bin/${command}`]) {
+    try {
+      await access(candidate);
+      return true;
+    } catch {
+      continue;
+    }
+  }
+  return false;
+}
 function collect(command: string, args: string[], cwd: string): Promise<{ exitCode: number | null; output: string }> {
   return new Promise((resolve) => {
     const child = spawn(command, args, { cwd });

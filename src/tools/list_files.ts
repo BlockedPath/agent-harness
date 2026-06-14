@@ -32,7 +32,6 @@ async function tree(dir: string, workspaceRoot: string, depth: number, gitIgnore
   const entries = (await fs.readdir(dir, { withFileTypes: true })).filter((entry) => !DEFAULT_IGNORES.has(entry.name) && !gitIgnores.has(entry.name)).sort((a, b) => a.name.localeCompare(b.name));
   const lines: string[] = [];
   for (const entry of entries) {
-    const rel = path.relative(workspaceRoot, path.join(dir, entry.name));
     lines.push(`${prefix}${entry.name}${entry.isDirectory() ? '/' : ''}`);
     if (entry.isDirectory()) lines.push(await tree(path.join(dir, entry.name), workspaceRoot, depth - 1, gitIgnores, `${prefix}  `));
     if (lines.join('\n').length > 20_000) break;

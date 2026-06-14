@@ -1,6 +1,5 @@
-import { createTwoFilesPatch, parsePatch } from 'diff';
+import { createTwoFilesPatch } from 'diff';
 import fs from 'node:fs/promises';
-import path from 'node:path';
 import type { ChatMessage, LlmProvider, StreamChunk, ToolCall } from '../llm/types.js';
 import { buildSystemPrompt } from './prompts.js';
 import type { AgentEvent } from './types.js';
