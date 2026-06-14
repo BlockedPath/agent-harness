@@ -1,0 +1,7 @@
+node_modules
+dist
+.harness
+.env
+.DS_Store
+coverage
+tokscale-export-*.json
