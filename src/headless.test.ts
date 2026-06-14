@@ -63,6 +63,7 @@ describe('runHeadless', () => {
     });
     const dir = path.join(root, '.harness', 'sessions');
     const [file] = await fs.readdir(dir);
+    if (!file) throw new Error('expected a session file');
     const session = await loadSession(root, file.replace(/\.jsonl$/, ''));
     expect(session.messages).toEqual([
       { role: 'user', content: 'remember this' },

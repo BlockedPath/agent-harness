@@ -32,7 +32,8 @@ export const HELP_TEXT = ['Available commands:', ...COMMANDS.map((command) => {
   return `  ${names.padEnd(20)} ${command.summary}`;
 })].join('\n');
 
-function matches(trimmed: string, command: CommandSpec): boolean {
+function matches(trimmed: string, command: CommandSpec | undefined): boolean {
+  if (!command) return false;
   const names = [command.name, ...(command.aliases ?? [])];
   return names.some((name) => trimmed === name || trimmed.startsWith(`${name} `));
 }

@@ -16,7 +16,7 @@ describe('parseCommand', () => {
   });
 
   it('selects a known model passed inline to /models', () => {
-    const model = CODEX_MODELS[1].id;
+    const model = CODEX_MODELS[1]!.id;
     expect(parseCommand(`/models ${model}`, CODEX_MODELS)).toEqual({
       kind: 'set-model',
       model,

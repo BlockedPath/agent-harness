@@ -153,6 +153,7 @@ describe('agent e2e (full stack via runHeadless)', () => {
 
     const dir = path.join(root, '.harness', 'sessions');
     const [file] = await fs.readdir(dir);
+    if (!file) throw new Error('expected a session file');
     const sessionId = file.replace(/\.jsonl$/, '');
 
     await runHeadless({
