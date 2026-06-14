@@ -32,4 +32,4 @@ export const CODEX_MODELS: ModelOption[] = [
   },
 ];
 
-export const DEFAULT_CODEX_MODEL = CODEX_MODELS[0].id;
+export const DEFAULT_CODEX_MODEL = CODEX_MODELS[0]?.id ?? 'gpt-5.5';

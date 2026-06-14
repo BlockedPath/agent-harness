@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import { useTuiStore } from '../store.js';
 
@@ -49,12 +49,13 @@ export function InputBar({ onSubmit }: { onSubmit: (value: string) => void }) {
       setSelectedCommandIndex((current) => (current + 1) % commandPreview.length);
       return;
     }
-    if (commandPreview.length > 0 && key.tab) {
-      setValue(commandPreview[selectedCommandIndex].name);
+    const selectedCommand = commandPreview[selectedCommandIndex];
+    if (commandPreview.length > 0 && key.tab && selectedCommand) {
+      setValue(selectedCommand.name);
       return;
     }
     if (key.return && value.trim()) {
-      onSubmit(commandPreview.length > 0 ? commandPreview[selectedCommandIndex].name : value.trim());
+      onSubmit(commandPreview.length > 0 && selectedCommand ? selectedCommand.name : value.trim());
       setValue('');
       return;
     }

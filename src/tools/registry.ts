@@ -1,5 +1,5 @@
-import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ToolDefinition } from '../llm/types.js';
+import { toJsonSchema } from '../util/json-schema.js';
 import { applyPatchTool } from './apply_patch.js';
 import { askUserTool } from './ask_user.js';
 import { createFileTool } from './create_file.js';
@@ -17,4 +17,4 @@ export const ALL_TOOLS = [readFileTool, listFilesTool, searchFilesTool, applyPat
 
 export function getTool(name: string): ToolDefinitionFull | undefined { return ALL_TOOLS.find((tool) => tool.name === name); }
 export function toProviderTools(tools: ToolDefinitionFull[] = ALL_TOOLS): ToolDefinition[] { return tools.map(({ name, description, parameters }) => ({ name, description, parameters })); }
-export function toJsonSchemaTools(tools: ToolDefinitionFull[] = ALL_TOOLS): unknown[] { return tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: zodToJsonSchema(tool.parameters as never) })); }
+export function toJsonSchemaTools(tools: ToolDefinitionFull[] = ALL_TOOLS): unknown[] { return tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: toJsonSchema(tool.parameters) })); }

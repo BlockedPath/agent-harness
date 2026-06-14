@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Text } from 'ink';
 import type { Config } from '../config/schema.js';
 import { createProvider } from '../llm/registry.js';

@@ -1,4 +1,3 @@
-import React from 'react';
 import { Box, Text } from 'ink';
 import type { ToolCardState } from '../store.js';
 import { DiffView } from './diff-view.js';
