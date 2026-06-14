@@ -50,7 +50,7 @@ export class CodexOAuthProvider implements LlmProvider {
       body: JSON.stringify({
         model: normalizeCodexModel(options.model),
         instructions: readInstructions(options.messages),
-        input: options.messages.filter((message) => message.role !== 'system').map(toResponsesInput),
+        input: options.messages.filter((message) => message.role !== 'system').flatMap(toResponsesInput),
         tools: options.tools.map(toResponsesTool),
         temperature: options.temperature,
         stream: true,
@@ -138,16 +138,21 @@ function readInstructions(messages: ChatMessage[]): string {
   return messages.filter((message) => message.role === 'system').map((message) => message.content).join('\n\n');
 }
 
-function toResponsesInput(message: ChatMessage): Record<string, unknown> {
-  if (message.role === 'tool') return { type: 'function_call_output', call_id: message.toolCallId, output: message.content };
+function toResponsesInput(message: ChatMessage): Record<string, unknown>[] {
+  // The Responses API models tool use as standalone items, not Chat Completions
+  // `tool_calls` on an assistant message: a `function_call` for each request and
+  // a `function_call_output` for each result.
+  if (message.role === 'tool') return [{ type: 'function_call_output', call_id: message.toolCallId, output: message.content }];
   if (message.toolCalls?.length) {
-    return {
-      role: 'assistant',
-      content: message.content,
-      tool_calls: message.toolCalls.map((call) => ({ id: call.id, type: call.type, function: call.function })),
-    };
+    const items: Record<string, unknown>[] = [];
+    if (message.content) items.push({ role: 'assistant', content: message.content });
+    for (const call of message.toolCalls) {
+      if (!call.function.name) continue; // skip malformed calls the API would reject
+      items.push({ type: 'function_call', call_id: call.id, name: call.function.name, arguments: call.function.arguments });
+    }
+    return items;
   }
-  return { role: message.role, content: message.content };
+  return [{ role: message.role, content: message.content }];
 }
 
 function toResponsesTool(tool: ToolDefinition): Record<string, unknown> {
@@ -183,9 +188,10 @@ function* parseSseEvent(event: string): Iterable<StreamChunk> {
   const type = typeof parsed.type === 'string' ? parsed.type : '';
 
   if (type === 'response.output_text.delta' && typeof parsed.delta === 'string') yield { type: 'content', content: parsed.delta };
-  if (type === 'response.function_call_arguments.delta' && typeof parsed.delta === 'string') {
-    yield { type: 'tool_call', toolCall: { id: firstString(parsed.call_id, parsed.item_id) ?? undefined, name: typeof parsed.name === 'string' ? parsed.name : undefined, arguments: parsed.delta } };
-  }
+  // Tool calls are emitted only from output_item.done: it carries the complete
+  // call_id, name, and arguments. The incremental arguments.delta events are keyed
+  // by item_id (not call_id) and omit the name, so aggregating them would produce a
+  // duplicate, nameless tool call that the Responses API later rejects.
   if (type === 'response.output_item.done' && isRecord(parsed.item) && parsed.item.type === 'function_call') {
     yield { type: 'tool_call', toolCall: { id: firstString(parsed.item.call_id, parsed.item.id) ?? undefined, name: firstString(parsed.item.name) ?? undefined, arguments: firstString(parsed.item.arguments) ?? undefined } };
   }

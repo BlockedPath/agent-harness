@@ -28,4 +28,34 @@ describe('createCliProgram', () => {
       sessionId: 'session-1',
     });
   });
+
+  it('runs headless instead of rendering when --print is passed', async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'harness-cli-'));
+    const configPath = path.join(workspaceRoot, 'harness.config.json');
+    await fs.writeFile(configPath, JSON.stringify({
+      defaultProvider: 'codex',
+      defaultModel: 'gpt-5.5',
+      providers: { openai: { apiKeyEnv: 'OPENAI_API_KEY' } },
+    }));
+
+    const rendered: React.ReactElement[] = [];
+    const headlessCalls: unknown[] = [];
+    const program = createCliProgram({
+      cwd: workspaceRoot,
+      renderApp: (element) => rendered.push(element),
+      runHeadless: async (options) => { headlessCalls.push(options); },
+    });
+
+    await program.parseAsync(['node', 'harness', '--config', configPath, '--print', 'do the thing', '--yes'], { from: 'node' });
+
+    expect(rendered).toHaveLength(0);
+    expect(headlessCalls).toHaveLength(1);
+    expect(headlessCalls[0]).toMatchObject({
+      workspaceRoot,
+      providerId: 'codex',
+      model: 'gpt-5.5',
+      prompt: 'do the thing',
+      autoApprove: true,
+    });
+  });
 });

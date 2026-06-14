@@ -11,4 +11,5 @@ export interface Session {
 
 export type SessionEvent =
   | { type: 'session-created'; data: Omit<Session, 'messages'> }
-  | { type: 'message'; data: ChatMessage };
+  | { type: 'message'; data: ChatMessage }
+  | { type: 'model-changed'; data: { model: string } };

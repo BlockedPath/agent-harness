@@ -65,6 +65,61 @@ describe('CodexOAuthProvider', () => {
     expect(body.input).toEqual([{ role: 'user', content: 'Hi' }]);
     expect(body.max_output_tokens).toBeUndefined();
   });
+
+  it('serializes tool calls and results as Responses API items, not chat tool_calls', async () => {
+    const fetch = vi.fn(async (_url: string, _init: RequestInit) => ({
+      ok: true,
+      body: new ReadableStream<Uint8Array>({ start(controller) { controller.close(); } }),
+    }));
+    vi.stubGlobal('fetch', fetch);
+
+    const provider = new CodexOAuthProvider({ accessToken: 'token' });
+    await provider.stream({
+      model: 'gpt-5.5',
+      tools: [],
+      messages: [
+        { role: 'user', content: 'list files' },
+        { role: 'assistant', content: 'on it', toolCalls: [{ id: 'call_1', type: 'function', function: { name: 'list_files', arguments: '{"path":"."}' } }] },
+        { role: 'tool', toolCallId: 'call_1', content: 'a.ts\nb.ts' },
+      ],
+    });
+
+    const [, init] = fetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init.body)) as { input: Array<Record<string, unknown>> };
+    expect(body.input).toEqual([
+      { role: 'user', content: 'list files' },
+      { role: 'assistant', content: 'on it' },
+      { type: 'function_call', call_id: 'call_1', name: 'list_files', arguments: '{"path":"."}' },
+      { type: 'function_call_output', call_id: 'call_1', output: 'a.ts\nb.ts' },
+    ]);
+    // The Chat Completions shape that triggered "Unknown parameter: input[].tool_calls".
+    expect(JSON.stringify(body.input)).not.toContain('tool_calls');
+  });
+
+  it('emits one complete tool call from output_item.done, ignoring nameless arg deltas', async () => {
+    const events = [
+      'event: response.function_call_arguments.delta\ndata: {"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{\\"pattern\\""}\n\n',
+      'event: response.function_call_arguments.delta\ndata: {"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":":\\"todo\\"}"}\n\n',
+      'event: response.output_item.done\ndata: {"type":"response.output_item.done","item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"search_files","arguments":"{\\"pattern\\":\\"todo\\"}"}}\n\n',
+    ];
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const event of events) controller.enqueue(new TextEncoder().encode(event));
+          controller.close();
+        },
+      }),
+    }));
+    vi.stubGlobal('fetch', fetch);
+
+    const provider = new CodexOAuthProvider({ accessToken: 'token' });
+    const stream = await provider.stream({ model: 'gpt-5.5', messages: [{ role: 'user', content: 'find todos' }], tools: [] });
+    const toolCalls = [];
+    for await (const chunk of stream) if (chunk.type === 'tool_call') toolCalls.push(chunk.toolCall);
+
+    expect(toolCalls).toEqual([{ id: 'call_1', name: 'search_files', arguments: '{"pattern":"todo"}' }]);
+  });
 });
 
 function authFile(accessToken: string, lastRefresh: string): Record<string, unknown> {

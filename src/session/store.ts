@@ -22,6 +22,10 @@ export async function appendMessage(workspaceRoot: string, sessionId: string, me
   await appendEvent(workspaceRoot, sessionId, { type: 'message', data: message });
 }
 
+export async function setSessionModel(workspaceRoot: string, sessionId: string, model: string): Promise<void> {
+  await appendEvent(workspaceRoot, sessionId, { type: 'model-changed', data: { model } });
+}
+
 export async function loadSession(workspaceRoot: string, sessionId: string): Promise<Session> {
   const raw = await fs.readFile(path.join(sessionDir(workspaceRoot), `${sessionId}.jsonl`), 'utf8');
   let session: Session | null = null;
@@ -32,6 +36,10 @@ export async function loadSession(workspaceRoot: string, sessionId: string): Pro
     if (event.type === 'message') {
       if (!session) throw new Error(`Session ${sessionId} is missing creation event.`);
       session.messages.push(event.data);
+    }
+    if (event.type === 'model-changed') {
+      if (!session) throw new Error(`Session ${sessionId} is missing creation event.`);
+      session.model = event.data.model;
     }
   }
   if (!session) throw new Error(`Session not found: ${sessionId}`);

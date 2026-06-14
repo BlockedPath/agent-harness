@@ -1,11 +1,12 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Box, Text } from 'ink';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Box, Text, useApp } from 'ink';
 import type { Config } from '../config/schema.js';
 import { createProvider } from '../llm/registry.js';
 import { CODEX_MODELS } from '../llm/models.js';
 import { loginWithCodexBrowser } from '../llm/providers/codex-login.js';
 import { runTurn } from '../agent/loop.js';
-import { createSession, loadSession } from '../session/store.js';
+import { createSession, loadSession, setSessionModel } from '../session/store.js';
+import { parseCommand } from './commands.js';
 import type { Session } from '../session/types.js';
 import { ALL_TOOLS } from '../tools/registry.js';
 import { ApprovalModal } from './components/approval-modal.js';
@@ -30,6 +31,7 @@ export function App(props: AppProps) {
 
 function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppProps) {
   const { state, dispatch } = useTuiStore();
+  const { exit } = useApp();
   const [session, setSession] = useState<Session | null>(null);
   const [activeModel, setActiveModel] = useState(model);
   const running = useRef(false);
@@ -58,27 +60,44 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
       });
   }, [config.providers.codex?.oauthCredentialsPath, config.providers.codex?.oauthSourceCredentialsPath, dispatch]);
 
+  const applyModelChange = useCallback((newModel: string, notice: string) => {
+    setActiveModel(newModel);
+    setSession((current) => {
+      if (!current) return current;
+      void setSessionModel(current.workspaceRoot, current.id, newModel);
+      return { ...current, model: newModel };
+    });
+    dispatch({ type: 'add-message', message: { role: 'assistant', content: notice } });
+  }, [dispatch]);
+
   const submit = useCallback((message: string) => {
-    if (message === '/login') {
-      dispatch({ type: 'set-screen', screen: 'login' });
+    const action = parseCommand(message, CODEX_MODELS);
+    if (action.kind === 'open-screen') {
+      dispatch({ type: 'set-screen', screen: action.screen });
       return;
     }
-    if (message.startsWith('/models')) {
-      const requestedModel = message.split(/\s+/)[1];
-      if (requestedModel) {
-        const option = CODEX_MODELS.find((candidate) => candidate.id === requestedModel);
-        if (option) {
-          setActiveModel(option.id);
-          setSession((current) => current ? { ...current, model: option.id } : current);
-          dispatch({ type: 'add-message', message: { role: 'assistant', content: `Model changed to ${option.id}.` } });
-        } else {
-          dispatch({ type: 'add-message', message: { role: 'assistant', content: `Unknown Codex model: ${requestedModel}. Type /models to choose one.` } });
-        }
-        return;
-      }
-      dispatch({ type: 'set-screen', screen: 'models' });
+    if (action.kind === 'notice') {
+      dispatch({ type: 'add-message', message: { role: 'assistant', content: action.notice } });
       return;
     }
+    if (action.kind === 'set-model') {
+      applyModelChange(action.model, action.notice);
+      return;
+    }
+    if (action.kind === 'exit') {
+      exit();
+      return;
+    }
+    if (action.kind === 'clear') {
+      if (running.current) return;
+      dispatch({ type: 'reset' });
+      void createSession(workspaceRoot, providerId, activeModel).then((fresh) => {
+        setSession(fresh);
+        dispatch({ type: 'add-message', message: { role: 'assistant', content: `Started a new session ${fresh.id}.` } });
+      });
+      return;
+    }
+    message = action.text;
     if (!session || running.current) return;
     running.current = true;
     dispatch({ type: 'add-message', message: { role: 'user', content: message } });
@@ -111,7 +130,7 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
       dispatch({ type: 'set-disabled', disabled: false });
       running.current = false;
     });
-  }, [session, config, providerId, dispatch]);
+  }, [session, config, providerId, dispatch, applyModelChange, exit, workspaceRoot, activeModel]);
 
   return (
     <Box flexDirection="column" width="100%" minHeight={24} borderStyle="round" paddingX={1}>
@@ -137,9 +156,7 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
             models={CODEX_MODELS}
             onCancel={() => dispatch({ type: 'set-screen', screen: 'chat' })}
             onSelect={(selectedModel) => {
-              setActiveModel(selectedModel);
-              setSession((current) => current ? { ...current, model: selectedModel } : current);
-              dispatch({ type: 'add-message', message: { role: 'assistant', content: `Model changed to ${selectedModel}.` } });
+              applyModelChange(selectedModel, `Model changed to ${selectedModel}.`);
               dispatch({ type: 'set-screen', screen: 'chat' });
             }}
           />

@@ -81,7 +81,9 @@ async function aggregateAndEmit(stream: AsyncIterable<StreamChunk>, onEvent: (ev
       toolCalls.set(id, existing);
     }
   }
-  return { content, toolCalls: [...toolCalls.values()] };
+  // Drop any malformed tool call without a name: it cannot be dispatched and, if
+  // stored, would be replayed to the provider as an invalid function_call.
+  return { content, toolCalls: [...toolCalls.values()].filter((call) => call.function.name) };
 }
 
 function parseArgs(raw: string): unknown { try { return JSON.parse(raw || '{}'); } catch { return {}; } }
