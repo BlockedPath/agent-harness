@@ -109,6 +109,7 @@ Useful TUI commands:
 /login              # open provider login choices
 /models             # open the model picker (alias: /model)
 /models gpt-5.5     # switch directly to a known model
+/resume             # list and resume a previous session (alias: /sessions)
 /clear              # start a fresh session and clear the screen (alias: /new)
 /exit               # exit the harness (alias: /quit)
 ```

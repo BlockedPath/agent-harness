@@ -3,7 +3,7 @@
 ## Near Term
 
 - ~~Add a non-interactive command mode for running one prompt from the shell.~~ (done: `harness -p "<prompt>"`)
-- Improve Codex OAuth recovery by offering a guided `/login` retry after auth failures.
+- ~~Improve Codex OAuth recovery by offering a guided `/login` retry after auth failures.~~ (done)
 - ~~Persist model changes made through `/models` back into the active session file.~~ (done)
 
 ## Quality
@@ -14,9 +14,9 @@
 
 ## Product
 
-- Add a concise session list/resume UI.
-- Show token usage in the TUI when providers emit usage chunks.
-- Add clearer error rendering for provider, tool, and approval failures.
+- ~~Add a concise session list/resume UI.~~ (done: `/resume`)
+- ~~Show token usage in the TUI when providers emit usage chunks.~~ (done)
+- ~~Add clearer error rendering for provider, tool, and approval failures.~~ (done)
 - Add a first-run state that explains how to authenticate providers.
 
 ## Later

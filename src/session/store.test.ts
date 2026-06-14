@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { appendMessage, createSession, listSessions, loadSession, setSessionModel } from './store.js';
+import { appendMessage, createSession, listSessions, listSessionSummaries, loadSession, setSessionModel } from './store.js';
 
 async function makeWorkspace(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'harness-session-'));
@@ -58,5 +58,38 @@ describe('session store resume', () => {
   it('returns an empty list when no sessions exist', async () => {
     const workspaceRoot = await makeWorkspace();
     expect(await listSessions(workspaceRoot)).toEqual([]);
+  });
+});
+
+describe('listSessionSummaries', () => {
+  it('summarizes sessions with model, message count, and a preview', async () => {
+    const workspaceRoot = await makeWorkspace();
+    const session = await createSession(workspaceRoot, 'codex', 'gpt-5.5');
+    await appendMessage(workspaceRoot, session.id, { role: 'user', content: 'fix the   login bug please' });
+    await appendMessage(workspaceRoot, session.id, { role: 'assistant', content: 'on it' });
+
+    const [summary] = await listSessionSummaries(workspaceRoot);
+    expect(summary).toMatchObject({
+      id: session.id,
+      model: 'gpt-5.5',
+      messageCount: 2,
+      preview: 'fix the login bug please',
+    });
+  });
+
+  it('orders newest first and respects the limit', async () => {
+    const workspaceRoot = await makeWorkspace();
+    const older = await createSession(workspaceRoot, 'codex', 'gpt-5.5');
+    const newer = await createSession(workspaceRoot, 'codex', 'gpt-5.5');
+    await appendMessage(workspaceRoot, newer.id, { role: 'user', content: 'newest' });
+
+    const summaries = await listSessionSummaries(workspaceRoot, 1);
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]!.id).toBe(newer.id);
+    expect(summaries.map((s) => s.id)).not.toContain(older.id);
+  });
+
+  it('returns an empty list when there are no sessions', async () => {
+    expect(await listSessionSummaries(await makeWorkspace())).toEqual([]);
   });
 });
