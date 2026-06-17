@@ -6,11 +6,12 @@ import { buildSystemPrompt } from './prompts.js';
 import type { AgentEvent } from './types.js';
 import type { PermissionConfig } from '../policy/types.js';
 import { requiresApproval } from '../policy/approval.js';
+import { classifyCommand } from '../policy/classifier.js';
 import { appendMessage } from '../session/store.js';
 import type { Session } from '../session/types.js';
 import { resolveWorkspacePath } from '../sandbox/workspace-boundary.js';
 import { toProviderTools } from '../tools/registry.js';
-import type { ToolDefinitionFull, ToolResult } from '../tools/types.js';
+import type { RiskLevel, ToolDefinitionFull, ToolResult } from '../tools/types.js';
 import { loadWorkspaceContext } from '../workspace/context.js';
 
 export interface RunTurnOptions {
@@ -53,7 +54,8 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
         continue;
       }
       const diff = await previewDiff(tool.name, parsed.data, options.session.workspaceRoot);
-      if (requiresApproval(tool.risk, options.config.permissions)) {
+      const approvalRisk = riskForApproval(tool, parsed.data);
+      if (requiresApproval(approvalRisk, options.config.permissions)) {
         const approved = await new Promise<boolean>((resolve) => options.onEvent({ type: 'approval-request', toolCallId: toolCall.id, name: tool.name, diff, resolve }));
         if (!approved) {
           await pushToolResult(options, toolCall.id, { ok: false, output: 'User denied approval.', error: 'denied' });
@@ -67,11 +69,14 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
     }
   }
   options.onEvent({ type: 'error', message: 'Agent iteration limit reached.' });
+  options.onEvent({ type: 'done' });
 }
 
 function parseArgs(raw: string): unknown { try { return JSON.parse(raw || '{}'); } catch { return {}; } }
-function trimMessages(messages: ChatMessage[]): ChatMessage[] { return messages.slice(-40).map((message) => message.role === 'tool' && message.content.length > 4000 ? { ...message, content: `${message.content.slice(0, 4000)}\n[trimmed]` } : message); }
+function trimMessages(messages: ChatMessage[]): ChatMessage[] { return messages.slice(-40).map((message) => message.role === 'tool' && message.content.length > 4000 ? { ...message, content: `${message.content.slice(0, 4000)}\n[trimmed ${Buffer.byteLength(message.content.slice(4000), 'utf8')} bytes]` } : message); }
 async function pushToolResult(options: RunTurnOptions, toolCallId: string, result: ToolResult): Promise<void> { const message: ChatMessage = { role: 'tool', toolCallId, content: result.ok ? result.output : `${result.error ?? 'error'}\n${result.output}` }; options.session.messages.push(message); await appendMessage(options.session.workspaceRoot, options.session.id, message); }
+function riskForApproval(tool: ToolDefinitionFull, input: unknown): RiskLevel { return tool.name === 'run_command' ? classifyCommand((input as { command?: string }).command ?? '') : tool.risk; }
+function replaceLiteralOnce(content: string, oldString: string, newString: string): string { return content.replace(oldString, () => newString); }
 
 async function previewDiff(toolName: string, input: unknown, workspaceRoot: string): Promise<string | undefined> {
   const data = input as { path: string; oldString: string; newString: string; content?: string; patch: string };
@@ -79,7 +84,7 @@ async function previewDiff(toolName: string, input: unknown, workspaceRoot: stri
     if (toolName === 'replace_string') {
       const abs = resolveWorkspacePath(workspaceRoot, data.path);
       const oldContent = await fs.readFile(abs, 'utf8');
-      return createTwoFilesPatch(data.path, data.path, oldContent, oldContent.replace(data.oldString, data.newString));
+      return createTwoFilesPatch(data.path, data.path, oldContent, replaceLiteralOnce(oldContent, data.oldString, data.newString));
     }
     if (toolName === 'create_file') return createTwoFilesPatch('/dev/null', data.path, '', data.content ?? '');
     if (toolName === 'delete_file') { const abs = resolveWorkspacePath(workspaceRoot, data.path); return createTwoFilesPatch(data.path, '/dev/null', await fs.readFile(abs, 'utf8'), ''); }

@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { resolveWorkspacePath } from '../sandbox/workspace-boundary.js';
 import { walkWorkspace } from '../workspace/glob.js';
+import { DEFAULT_IGNORES, readGitignore } from '../workspace/ignores.js';
 import type { ToolDefinitionFull } from './types.js';
 
-const DEFAULT_IGNORES = new Set(['node_modules', '.git', '.harness', '.pi', '.DS_Store', 'dist']);
 const schema = z.object({ pattern: z.string(), path: z.string().optional() });
 
 export const globTool: ToolDefinitionFull<z.infer<typeof schema>> = {
@@ -13,7 +13,8 @@ export const globTool: ToolDefinitionFull<z.infer<typeof schema>> = {
   risk: 'read',
   async run(input, ctx) {
     const root = resolveWorkspacePath(ctx.workspaceRoot, input.path ?? '.');
-    const entries = await walkWorkspace(root, { maxDepth: 12, ignores: DEFAULT_IGNORES });
+    const ignores = new Set([...DEFAULT_IGNORES, ...(await readGitignore(ctx.workspaceRoot))]);
+    const entries = await walkWorkspace(root, { maxDepth: 12, ignores });
     const regex = globToRegExp(input.pattern);
     const matches = entries.filter((entry) => !entry.isDirectory && regex.test(entry.relativePath)).map((entry) => entry.relativePath);
     return { ok: true, output: matches.length ? matches.slice(0, 500).join('\n') : 'No files matched.' };

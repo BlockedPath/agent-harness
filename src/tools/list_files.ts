@@ -15,19 +15,22 @@ export const listFilesTool: ToolDefinitionFull<z.infer<typeof schema>> = {
   async run(input, ctx) {
     const root = resolveWorkspacePath(ctx.workspaceRoot, input.path ?? '.');
     const gitIgnores = await readGitignore(ctx.workspaceRoot);
-    const output = await tree(root, ctx.workspaceRoot, input.depth ?? 3, gitIgnores);
-    return { ok: true, output };
+    const state = { lines: [] as string[], length: 0, truncated: false };
+    await tree(root, ctx.workspaceRoot, input.depth ?? 3, gitIgnores, '', state);
+    return { ok: true, output: state.lines.join('\n') + (state.truncated ? '\n... [truncated]' : '') };
   },
 };
 
-async function tree(dir: string, workspaceRoot: string, depth: number, gitIgnores: Set<string>, prefix = ''): Promise<string> {
-  if (depth < 0) return '';
+const OUTPUT_LIMIT = 20_000;
+
+async function tree(dir: string, workspaceRoot: string, depth: number, gitIgnores: Set<string>, prefix: string, state: { lines: string[]; length: number; truncated: boolean }): Promise<void> {
+  if (depth < 0 || state.truncated) return;
   const entries = (await fs.readdir(dir, { withFileTypes: true })).filter((entry) => !DEFAULT_IGNORES.has(entry.name) && !gitIgnores.has(entry.name)).sort((a, b) => a.name.localeCompare(b.name));
-  const lines: string[] = [];
   for (const entry of entries) {
-    lines.push(`${prefix}${entry.name}${entry.isDirectory() ? '/' : ''}`);
-    if (entry.isDirectory()) lines.push(await tree(path.join(dir, entry.name), workspaceRoot, depth - 1, gitIgnores, `${prefix}  `));
-    if (lines.join('\n').length > 20_000) break;
+    const line = `${prefix}${entry.name}${entry.isDirectory() ? '/' : ''}`;
+    state.lines.push(line);
+    state.length += line.length + 1;
+    if (state.length > OUTPUT_LIMIT) { state.truncated = true; return; }
+    if (entry.isDirectory()) await tree(path.join(dir, entry.name), workspaceRoot, depth - 1, gitIgnores, `${prefix}  `, state);
   }
-  return lines.filter(Boolean).join('\n');
 }
