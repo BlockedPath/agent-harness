@@ -35,8 +35,13 @@ function collect(command: string, args: string[], cwd: string): Promise<{ exitCo
   return new Promise((resolve) => {
     const child = spawn(command, args, { cwd });
     let output = '';
+    let settled = false;
+    const settle = (result: { exitCode: number | null; output: string }) => { if (settled) return; settled = true; resolve(result); };
     child.stdout.on('data', (chunk) => { output += chunk.toString(); });
     child.stderr.on('data', (chunk) => { output += chunk.toString(); });
-    child.on('close', (exitCode) => resolve({ exitCode, output }));
+    // Spawn failure (e.g. rg/grep missing) emits 'error' and may never emit 'close';
+    // resolve with a non-zero exit so the tool reports an error instead of hanging.
+    child.on('error', (err: Error) => settle({ exitCode: -1, output: output || err.message }));
+    child.on('close', (exitCode) => settle({ exitCode, output }));
   });
 }

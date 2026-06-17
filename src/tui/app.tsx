@@ -65,7 +65,11 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
           if (event.type === 'approval-request') dispatch({ type: 'approval', request: event });
           if (event.type === 'question') dispatch({ type: 'question', question: event });
           if (event.type === 'usage') dispatch({ type: 'usage', usage: event.usage });
-          if (event.type === 'error') dispatch({ type: 'add-error', severity: 'provider', content: event.message });
+          if (event.type === 'error') {
+            dispatch({ type: 'add-error', severity: 'provider', content: event.message });
+            dispatch({ type: 'set-disabled', disabled: false });
+            running.current = false;
+          }
           if (event.type === 'done') {
             dispatch({ type: 'flush-stream' });
             dispatch({ type: 'set-disabled', disabled: false });

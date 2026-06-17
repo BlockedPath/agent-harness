@@ -31,7 +31,12 @@ export async function loadSession(workspaceRoot: string, sessionId: string): Pro
   let session: Session | null = null;
   for (const line of raw.split(/\r?\n/)) {
     if (!line.trim()) continue;
-    const event = JSON.parse(line) as SessionEvent;
+    let event: SessionEvent;
+    try {
+      event = JSON.parse(line) as SessionEvent;
+    } catch {
+      continue; // skip malformed lines so one bad entry doesn't crash the whole session load
+    }
     if (event.type === 'session-created') session = { ...event.data, messages: [] };
     if (event.type === 'message') {
       if (!session) throw new Error(`Session ${sessionId} is missing creation event.`);
