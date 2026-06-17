@@ -30,12 +30,20 @@ export class OpenAiProvider implements LlmProvider {
     });
 
     async function* normalize(): AsyncIterable<StreamChunk> {
+      // OpenAI sends a tool call's id+name only on its first delta; later argument
+      // fragments arrive with the same `index` but no id/name. Map index->id so the
+      // aggregator (which keys by id) reassembles fragments into one call instead of
+      // dropping the id-less remainder.
+      const toolIdsByIndex = new Map<number, string>();
       for await (const chunk of response) {
         const choice = chunk.choices[0];
         const delta = choice?.delta;
         if (delta?.content) yield { type: 'content', content: delta.content };
         for (const call of delta?.tool_calls ?? []) {
-          yield { type: 'tool_call', toolCall: { id: call.id, name: call.function?.name, arguments: call.function?.arguments } };
+          const index = call.index;
+          if (call.id && typeof index === 'number') toolIdsByIndex.set(index, call.id);
+          const id = call.id ?? (typeof index === 'number' ? toolIdsByIndex.get(index) ?? `openai-tool-${index}` : undefined);
+          yield { type: 'tool_call', toolCall: { id, name: call.function?.name, arguments: call.function?.arguments } };
         }
         if (chunk.usage) {
           yield { type: 'usage', usage: { promptTokens: chunk.usage.prompt_tokens, completionTokens: chunk.usage.completion_tokens, totalTokens: chunk.usage.total_tokens } };
