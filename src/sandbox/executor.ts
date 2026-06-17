@@ -17,13 +17,21 @@ export interface RunResult { exitCode: number | null; stdout: string; stderr: st
 
 // Secrets are never exported into the child's environment. Even when a command runs
 // unsandboxed (non-darwin, or `dangerous` mode), this prevents `echo $OPENAI_API_KEY`
-// style exfiltration of provider/CI credentials into tool output.
-const SENSITIVE_ENV = /(API_KEY|_KEY$|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|_AUTH$|SESSION)/i;
+// style exfiltration of provider/CI credentials into tool output. Connection-string vars
+// (`DATABASE_URL`, `REDIS_URL`, `MONGODB_URI`, …) are stripped too because they embed
+// `user:password@host` — a relay review flagged these as a common real-world miss.
+const SENSITIVE_ENV = /(API_KEY|_KEY$|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|_AUTH$|SESSION|_PAT$|_URL$|_URI$|_DSN$|CONNECTION_STRING)/i;
 
-function sanitizeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+// Library-injection vectors: not secrets, but if set in the parent they would load code
+// into the spawned shell/sandbox-exec before seatbelt applies. Always dropped.
+const INJECTION_ENV = new Set([
+  'LD_PRELOAD', 'LD_LIBRARY_PATH', 'DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH', 'DYLD_FRAMEWORK_PATH',
+]);
+
+export function sanitizeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(env)) {
-    if (SENSITIVE_ENV.test(key)) continue;
+    if (SENSITIVE_ENV.test(key) || INJECTION_ENV.has(key)) continue;
     out[key] = value;
   }
   return out;
