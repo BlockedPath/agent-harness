@@ -1,11 +1,15 @@
+import type Anthropic from '@anthropic-ai/sdk';
 import { describe, it, expect } from 'vitest';
 import { normalizeAnthropicStream, toAnthropicMessage, coalesceToolResults } from './anthropic.js';
 import { aggregateStream } from '../stream.js';
 import type { ChatMessage, StreamChunk } from '../types.js';
 
-async function* fromEvents(events: any[]): AsyncIterable<any> {
+// Synthetic SDK events are partial-by-design; cast through the real event type once here.
+async function* fromEvents<T>(events: T[]): AsyncIterable<T> {
   for (const event of events) yield event;
 }
+const asStream = (events: unknown[]): AsyncIterable<Anthropic.MessageStreamEvent> =>
+  fromEvents(events) as unknown as AsyncIterable<Anthropic.MessageStreamEvent>;
 
 async function collect(stream: AsyncIterable<StreamChunk>): Promise<StreamChunk[]> {
   const out: StreamChunk[] = [];
@@ -23,7 +27,7 @@ describe('normalizeAnthropicStream', () => {
       { type: 'content_block_stop', index: 0 },
     ];
 
-    const aggregated = await aggregateStream(normalizeAnthropicStream(fromEvents(events) as any));
+    const aggregated = await aggregateStream(normalizeAnthropicStream(asStream(events)));
 
     expect(aggregated.toolCalls).toHaveLength(1);
     const call = aggregated.toolCalls[0]!;
@@ -40,7 +44,7 @@ describe('normalizeAnthropicStream', () => {
       { type: 'message_delta', delta: {}, usage: { input_tokens: null, output_tokens: 7 } },
     ];
 
-    const aggregated = await aggregateStream(normalizeAnthropicStream(fromEvents(events) as any));
+    const aggregated = await aggregateStream(normalizeAnthropicStream(asStream(events)));
 
     expect(aggregated.usage).toEqual({ promptTokens: 42, completionTokens: 7, totalTokens: 49 });
   });
@@ -51,7 +55,7 @@ describe('normalizeAnthropicStream', () => {
       { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{}' } },
     ];
 
-    const chunks = await collect(normalizeAnthropicStream(fromEvents(events) as any));
+    const chunks = await collect(normalizeAnthropicStream(asStream(events)));
     const deltaChunk = chunks.find((c) => c.type === 'tool_call' && c.toolCall?.arguments === '{}');
     expect(deltaChunk?.toolCall?.name).toBeUndefined();
     expect(deltaChunk?.toolCall?.id).toBe('toolu_1');
@@ -67,9 +71,9 @@ describe('toAnthropicMessage', () => {
     };
 
     const result = toAnthropicMessage(message);
-    const content = result.content as any[];
+    const content = result.content as Anthropic.ContentBlockParam[];
     expect(content).toHaveLength(1);
-    expect(content[0].type).toBe('tool_use');
+    expect(content[0]?.type).toBe('tool_use');
     expect(content.some((b) => b.type === 'text')).toBe(false);
   });
 
@@ -81,10 +85,10 @@ describe('toAnthropicMessage', () => {
     };
 
     const result = toAnthropicMessage(message);
-    const content = result.content as any[];
+    const content = result.content as Anthropic.ContentBlockParam[];
     expect(content).toHaveLength(2);
     expect(content[0]).toEqual({ type: 'text', text: 'hi' });
-    expect(content[1].type).toBe('tool_use');
+    expect(content[1]?.type).toBe('tool_use');
   });
 });
 
@@ -97,7 +101,7 @@ describe('coalesceToolResults', () => {
 
     expect(merged).toHaveLength(1);
     expect(merged[0]!.role).toBe('user');
-    const content = merged[0]!.content as any[];
+    const content = merged[0]!.content as Anthropic.ContentBlockParam[];
     expect(content).toHaveLength(2);
     expect(content[0]).toEqual({ type: 'tool_result', tool_use_id: 'toolu_1', content: 'r1' });
     expect(content[1]).toEqual({ type: 'tool_result', tool_use_id: 'toolu_2', content: 'r2' });
