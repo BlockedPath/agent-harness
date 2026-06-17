@@ -182,9 +182,6 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
 
   return (
     <Box flexDirection="column" width="100%" minHeight={24} borderStyle="round" paddingX={1}>
-      <Box justifyContent="space-between">
-        <Text inverse> harness {session?.id ?? 'loading'} </Text>
-      </Box>
       <Box flexDirection="column" flexGrow={1} minHeight={14} paddingY={1}>
         <Messages />
         {state.screen === 'login' && (
