@@ -6,6 +6,7 @@ import type { Config } from './config/schema.js';
 import type { LlmProvider, StreamChunk } from './llm/types.js';
 import { loadSession } from './session/store.js';
 import { runHeadless } from './headless.js';
+import { scriptedProvider } from './test/fake-provider.js';
 
 const config: Config = {
   defaultProvider: 'codex',
@@ -89,5 +90,30 @@ describe('runHeadless', () => {
       write: () => {},
       writeErr: () => {},
     })).rejects.toThrow(/iteration limit/i);
+  });
+
+  it('announces a streaming tool call once before the tool starts', async () => {
+    const err: string[] = [];
+    await runHeadless({
+      workspaceRoot: await workspace(),
+      config: { ...config, permissions: { ...config.permissions, mode: 'auto' } },
+      providerId: 'codex',
+      model: 'gpt-5.5',
+      prompt: 'check status',
+      provider: scriptedProvider([
+        [
+          { type: 'tool_call', toolCall: { id: 't1', name: 'git_status', arguments: '{' } },
+          { type: 'tool_call', toolCall: { id: 't1', name: '', arguments: '}' } },
+        ],
+        [{ type: 'content', content: 'done' }],
+      ]),
+      write: () => {},
+      writeErr: (text) => err.push(text),
+    });
+
+    const stderr = err.join('');
+    expect(stderr.match(/\[tool→\] git_status/g) ?? []).toHaveLength(1);
+    expect(stderr.indexOf('[tool→] git_status')).toBeGreaterThanOrEqual(0);
+    expect(stderr.indexOf('[tool] git_status')).toBeGreaterThan(stderr.indexOf('[tool→] git_status'));
   });
 });
