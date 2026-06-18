@@ -38,6 +38,7 @@ export async function runHeadless(options: RunHeadlessOptions): Promise<void> {
 
   let errorMessage: string | null = null;
   let wroteContent = false;
+  const announcedToolCalls = new Set<string>();
 
   await runTurn({
     session,
@@ -49,6 +50,12 @@ export async function runHeadless(options: RunHeadlessOptions): Promise<void> {
       switch (event.type) {
         case 'content':
           if (event.text) { write(event.text); wroteContent = true; }
+          break;
+        case 'tool-call-delta':
+          if (event.name && !announcedToolCalls.has(event.toolCallId)) {
+            announcedToolCalls.add(event.toolCallId);
+            writeErr(`\n[tool→] ${event.name} (preparing…)\n`);
+          }
           break;
         case 'tool-start':
           writeErr(`\n[tool] ${event.name} ${JSON.stringify(event.input)}\n`);
