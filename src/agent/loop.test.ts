@@ -168,6 +168,48 @@ describe('runTurn (FIX 7: a thrown tool still records a tool result)', () => {
   });
 });
 
+describe('runTurn live tool-call deltas', () => {
+  const noopTool: ToolDefinitionFull<Record<string, never>> = {
+    name: 'noop', description: 'no-op', parameters: z.object({}), risk: 'read',
+    async run() { return { ok: true, output: 'fine' }; },
+  };
+
+  it('emits cumulative tool-call-delta events before tool-start, sharing the toolCallId', async () => {
+    const root = await tmpWorkspace();
+    const session = await createSession(root, 'fake', 'fake-model');
+    // Stream the tool call across two fragments so liveness is observable.
+    const provider = scriptedProvider([
+      [
+        { type: 'tool_call', toolCall: { id: 'd1', name: 'noop', arguments: '{' } },
+        { type: 'tool_call', toolCall: { id: 'd1', name: '', arguments: '}' } },
+      ],
+      [{ type: 'content', content: 'after' }],
+    ]);
+    const events: AgentEvent[] = [];
+    await runTurn({
+      session,
+      provider,
+      tools: [noopTool],
+      config: { permissions: autoPerms },
+      onEvent: (e) => events.push(e),
+      userMessage: 'go',
+    });
+
+    const deltas = events.filter((e) => e.type === 'tool-call-delta');
+    expect(deltas).toEqual([
+      { type: 'tool-call-delta', toolCallId: 'd1', name: 'noop', partialArgs: '{' },
+      { type: 'tool-call-delta', toolCallId: 'd1', name: 'noop', partialArgs: '{}' },
+    ]);
+    // Deltas precede execution and share the id with the eventual tool-start.
+    const deltaIndex = events.findIndex((e) => e.type === 'tool-call-delta');
+    const startIndex = events.findIndex((e) => e.type === 'tool-start');
+    expect(deltaIndex).toBeGreaterThanOrEqual(0);
+    expect(startIndex).toBeGreaterThan(deltaIndex);
+    const start = events[startIndex];
+    expect(start?.type === 'tool-start' && start.toolCallId).toBe('d1');
+  });
+});
+
 describe('runTurn auto-compaction', () => {
   it('compacts older history before the turn when enabled and over threshold', async () => {
     const root = await tmpWorkspace();

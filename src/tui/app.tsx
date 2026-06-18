@@ -61,6 +61,7 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
         userMessage: message,
         onEvent(event) {
           if (event.type === 'content') dispatch({ type: 'content', text: event.text });
+          if (event.type === 'tool-call-delta') dispatch({ type: 'tool-call-delta', id: event.toolCallId, name: event.name, partialArgs: event.partialArgs });
           if (event.type === 'tool-start') dispatch({ type: 'tool-start', id: event.toolCallId, name: event.name, input: event.input });
           if (event.type === 'tool-done') dispatch({ type: 'tool-done', id: event.toolCallId, output: event.result.output || event.result.error || '', ok: event.result.ok });
           if (event.type === 'approval-request') dispatch({ type: 'approval', request: event });

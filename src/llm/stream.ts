@@ -6,7 +6,20 @@ export interface AggregatedStream {
   usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
 }
 
-export async function aggregateStream(stream: AsyncIterable<StreamChunk>, onContent?: (text: string) => void): Promise<AggregatedStream> {
+export interface ToolCallDelta {
+  /** Stable id for this call; matches the assembled ToolCall.id. */
+  id: string;
+  /** Cumulative tool name seen so far (may be empty until the provider sends it). */
+  name: string;
+  /** Cumulative argument text seen so far — not necessarily valid JSON yet. */
+  partialArgs: string;
+}
+
+export async function aggregateStream(
+  stream: AsyncIterable<StreamChunk>,
+  onContent?: (text: string) => void,
+  onToolCall?: (delta: ToolCallDelta) => void,
+): Promise<AggregatedStream> {
   let content = '';
   const toolCalls = new Map<string, ToolCall>();
   let anonymousIndex = 0;
@@ -29,6 +42,7 @@ export async function aggregateStream(stream: AsyncIterable<StreamChunk>, onCont
       existing.function.name += chunk.toolCall?.name ?? '';
       existing.function.arguments += chunk.toolCall?.arguments ?? '';
       toolCalls.set(id, existing);
+      onToolCall?.({ id, name: existing.function.name, partialArgs: existing.function.arguments });
     }
   }
 

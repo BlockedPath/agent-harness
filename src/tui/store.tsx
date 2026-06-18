@@ -42,6 +42,7 @@ type Action =
   | { type: 'add-message'; message: ChatMessage }
   | { type: 'add-error'; severity: ErrorSeverity; content: string }
   | { type: 'content'; text: string }
+  | { type: 'tool-call-delta'; id: string; name: string; partialArgs: string }
   | { type: 'tool-start'; id: string; name: string; input: unknown }
   | { type: 'tool-done'; id: string; output: string; ok: boolean }
   | { type: 'approval'; request: ApprovalState | null }
@@ -84,8 +85,27 @@ export function reducer(state: TuiState, action: Action): TuiState {
       return { ...state, messages: [...state.messages, { role: 'error' as const, severity: action.severity, content: action.content }].slice(-200) };
     case 'content':
       return { ...state, streamingText: state.streamingText + action.text };
-    case 'tool-start':
+    case 'tool-call-delta': {
+      // Live streaming of a tool call's arguments BEFORE it runs. `partialArgs`
+      // is cumulative (the full text so far for this call), so we REPLACE rather
+      // than append. Never downgrade a card that has already advanced to
+      // running/done/error (the agent loop may emit a trailing delta).
+      const existing = state.toolCards.find((c) => c.id === action.id);
+      if (existing) {
+        return { ...state, toolCards: state.toolCards.map((c) => c.id === action.id ? { ...c, name: action.name, input: action.partialArgs } : c) };
+      }
+      return { ...state, toolCards: [...state.toolCards, { id: action.id, name: action.name, input: action.partialArgs, status: 'pending' }] };
+    }
+    case 'tool-start': {
+      // Upsert: a pending card from `tool-call-delta` may already exist for this
+      // id. Promote it to running with the parsed input instead of appending a
+      // duplicate card.
+      const existing = state.toolCards.find((c) => c.id === action.id);
+      if (existing) {
+        return { ...state, toolCards: state.toolCards.map((c) => c.id === action.id ? { ...c, name: action.name, input: action.input, status: 'running' } : c) };
+      }
       return { ...state, toolCards: [...state.toolCards, { id: action.id, name: action.name, input: action.input, status: 'running' }] };
+    }
     case 'tool-done':
       return { ...state, toolCards: state.toolCards.map((card) => card.id === action.id ? { ...card, status: action.ok ? 'done' : 'error', output: action.output } : card) };
     case 'approval':
