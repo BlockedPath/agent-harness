@@ -17,4 +17,18 @@ describe('aggregateStream', () => {
     expect(result.toolCalls[0]?.function.arguments).toBe('{"path":"a.ts"}');
     expect(result.usage?.totalTokens).toBe(3);
   });
+
+  it('reports cumulative tool-call deltas live via onToolCall', async () => {
+    async function* chunks(): AsyncIterable<StreamChunk> {
+      yield { type: 'tool_call', toolCall: { id: '1', name: 'read_', arguments: '{"path"' } };
+      yield { type: 'tool_call', toolCall: { id: '1', name: 'file', arguments: ':"a.ts"}' } };
+    }
+    const deltas: { id: string; name: string; partialArgs: string }[] = [];
+    await aggregateStream(chunks(), undefined, (delta) => deltas.push({ ...delta }));
+    // One delta per chunk, each carrying the cumulative name + args so far.
+    expect(deltas).toEqual([
+      { id: '1', name: 'read_', partialArgs: '{"path"' },
+      { id: '1', name: 'read_file', partialArgs: '{"path":"a.ts"}' },
+    ]);
+  });
 });
