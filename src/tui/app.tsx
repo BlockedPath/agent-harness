@@ -6,6 +6,7 @@ import { CODEX_MODELS } from '../llm/models.js';
 import { loginWithCodexBrowser } from '../llm/providers/codex-login.js';
 import { CodexAuthError } from '../llm/providers/codex-oauth.js';
 import { runTurn } from '../agent/loop.js';
+import { compactSession, DEFAULT_COMPACTION } from '../agent/compaction.js';
 import { createSession, listSessionSummaries, loadSession, setSessionModel, type SessionSummary } from '../session/store.js';
 import { parseCommand } from './commands.js';
 import type { Session } from '../session/types.js';
@@ -56,7 +57,7 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
         session,
         provider,
         tools: ALL_TOOLS,
-        config: { permissions: config.permissions },
+        config: { permissions: config.permissions, compaction: config.compaction },
         userMessage: message,
         onEvent(event) {
           if (event.type === 'content') dispatch({ type: 'content', text: event.text });
@@ -65,6 +66,7 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
           if (event.type === 'approval-request') dispatch({ type: 'approval', request: event });
           if (event.type === 'question') dispatch({ type: 'question', question: event });
           if (event.type === 'usage') dispatch({ type: 'usage', usage: event.usage });
+          if (event.type === 'compaction') dispatch({ type: 'add-message', message: { role: 'assistant', content: `Auto-compacted ${event.droppedCount} earlier messages to free up context (kept ${event.keptCount} recent).` } });
           if (event.type === 'error') {
             dispatch({ type: 'add-error', severity: 'provider', content: event.message });
             dispatch({ type: 'set-disabled', disabled: false });
@@ -119,6 +121,24 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
       });
   }, [config.providers.codex?.oauthCredentialsPath, config.providers.codex?.oauthSourceCredentialsPath, dispatch, runAgentTurn]);
 
+  const compactNow = useCallback(() => {
+    if (!session || running.current) return;
+    running.current = true;
+    dispatch({ type: 'set-disabled', disabled: true });
+    dispatch({ type: 'add-message', message: { role: 'assistant', content: 'Compacting conversation…' } });
+
+    void (async () => {
+      const provider = await createProvider({ ...config, defaultProvider: providerId });
+      const result = await compactSession({ session, provider, keepRecent: config.compaction?.keepRecent ?? DEFAULT_COMPACTION.keepRecent });
+      dispatch({ type: 'add-message', message: { role: 'assistant', content: result ? `Compacted ${result.droppedCount} messages into a summary (kept ${result.keptCount} recent).` : 'Nothing to compact yet — the history is already short.' } });
+    })().catch((error: unknown) => {
+      dispatch({ type: 'add-error', severity: 'provider', content: `Compaction failed: ${error instanceof Error ? error.message : String(error)}` });
+    }).finally(() => {
+      dispatch({ type: 'set-disabled', disabled: false });
+      running.current = false;
+    });
+  }, [session, config, providerId, dispatch]);
+
   const applyModelChange = useCallback((newModel: string, notice: string) => {
     setActiveModel(newModel);
     setSession((current) => {
@@ -168,6 +188,10 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
       exit();
       return;
     }
+    if (action.kind === 'compact') {
+      compactNow();
+      return;
+    }
     if (action.kind === 'clear') {
       if (running.current) return;
       dispatch({ type: 'reset' });
@@ -178,7 +202,7 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
       return;
     }
     runAgentTurn(action.text);
-  }, [dispatch, applyModelChange, exit, runAgentTurn, workspaceRoot, providerId, activeModel]);
+  }, [dispatch, applyModelChange, exit, compactNow, runAgentTurn, workspaceRoot, providerId, activeModel]);
 
   return (
     <Box flexDirection="column" width="100%" minHeight={24} borderStyle="round" paddingX={1}>

@@ -8,6 +8,7 @@ export type CommandAction =
   | { kind: 'open-screen'; screen: 'login' | 'models' | 'sessions' }
   | { kind: 'set-model'; model: string; notice: string }
   | { kind: 'notice'; notice: string }
+  | { kind: 'compact' }
   | { kind: 'clear' }
   | { kind: 'exit' }
   | { kind: 'prompt'; text: string };
@@ -24,6 +25,7 @@ export const COMMANDS: CommandSpec[] = [
   { name: '/login', summary: 'Open provider login choices.' },
   { name: '/models', aliases: ['/model'], summary: 'Open the model picker, or pass an id to switch directly.' },
   { name: '/resume', aliases: ['/sessions'], summary: 'List and resume a previous session.' },
+  { name: '/compact', summary: 'Summarize older history to free up the context window.' },
   { name: '/clear', aliases: ['/new'], summary: 'Start a fresh session and clear the screen.' },
   { name: '/exit', aliases: ['/quit'], summary: 'Exit the harness.' },
 ];
@@ -56,6 +58,7 @@ export function parseCommand(input: string, models: ModelOption[]): CommandActio
   }
 
   if (matches(trimmed, byName('/resume'))) return { kind: 'open-screen', screen: 'sessions' };
+  if (matches(trimmed, byName('/compact'))) return { kind: 'compact' };
   if (matches(trimmed, byName('/clear'))) return { kind: 'clear' };
   if (matches(trimmed, byName('/exit'))) return { kind: 'exit' };
 

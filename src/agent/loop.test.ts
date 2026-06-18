@@ -4,9 +4,10 @@ import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import { trimMessages, parseArgs, previewDiff, runTurn } from './loop.js';
+import { COMPACTION_SUMMARY_PREFIX } from './compaction.js';
 import { createSession } from '../session/store.js';
 import { scriptedProvider } from '../test/fake-provider.js';
-import type { ChatMessage } from '../llm/types.js';
+import type { ChatMessage, LlmProvider, StreamChunk } from '../llm/types.js';
 import type { AgentEvent } from './types.js';
 import type { PermissionConfig } from '../policy/types.js';
 import type { ToolDefinitionFull } from '../tools/types.js';
@@ -35,6 +36,26 @@ describe('trimMessages (FIX 3: orphaned tool result after trimming)', () => {
     const result = trimMessages(messages);
     expect(result.length).toBeGreaterThan(0);
     expect(result[0]?.role).not.toBe('tool');
+  });
+
+  it('keeps a leading compaction summary that the window would otherwise drop', () => {
+    const summary: ChatMessage = { role: 'user', content: `${COMPACTION_SUMMARY_PREFIX}\nearlier context` };
+    const tail: ChatMessage[] = [];
+    for (let i = 0; i < 45; i++) tail.push({ role: i % 2 === 0 ? 'assistant' : 'user', content: `m${i}` });
+    const result = trimMessages([summary, ...tail]);
+    expect(result[0]?.role).toBe('user');
+    expect(result[0]?.content).toContain(COMPACTION_SUMMARY_PREFIX);
+    expect(result.length).toBeLessThanOrEqual(40);
+  });
+
+  it('merges a preserved summary into a leading user turn so no two user messages are adjacent', () => {
+    const summary: ChatMessage = { role: 'user', content: `${COMPACTION_SUMMARY_PREFIX}\nS` };
+    const tail: ChatMessage[] = [];
+    for (let i = 0; i < 45; i++) tail.push({ role: i % 2 === 0 ? 'user' : 'assistant', content: `m${i}` });
+    const result = trimMessages([summary, ...tail]);
+    expect(result[0]?.role).toBe('user');
+    expect(result[0]?.content).toContain(COMPACTION_SUMMARY_PREFIX);
+    for (let i = 1; i < result.length; i++) expect(result[i - 1]?.role === 'user' && result[i]?.role === 'user').toBe(false);
   });
 
   it('preserves a well-formed tail (assistant followed by its tool result stays intact)', () => {
@@ -144,6 +165,79 @@ describe('runTurn (FIX 7: a thrown tool still records a tool result)', () => {
     const toolResult = session.messages.find((m) => m.role === 'tool' && m.toolCallId === 'c1');
     expect(toolResult).toBeDefined();
     expect(events.some((e) => e.type === 'error')).toBe(true);
+  });
+});
+
+describe('runTurn auto-compaction', () => {
+  it('compacts older history before the turn when enabled and over threshold', async () => {
+    const root = await tmpWorkspace();
+    const session = await createSession(root, 'fake', 'fake-model');
+    // Pre-fill history above the threshold (the new user message pushes it over).
+    for (let i = 0; i < 6; i++) session.messages.push({ role: i % 2 === 0 ? 'user' : 'assistant', content: `m${i}` });
+
+    // stream() call #1 is the compaction summary; call #2 is the turn itself (no tools -> done).
+    const provider = scriptedProvider([
+      [{ type: 'content', content: 'COMPACTED SUMMARY' }],
+      [{ type: 'content', content: 'answer' }],
+    ]);
+    const events: AgentEvent[] = [];
+    await runTurn({
+      session,
+      provider,
+      tools: [],
+      config: { permissions: autoPerms, compaction: { auto: true, messageThreshold: 5, keepRecent: 2 } },
+      onEvent: (e) => events.push(e),
+      userMessage: 'go',
+    });
+
+    const compactionEvent = events.find((e) => e.type === 'compaction');
+    expect(compactionEvent).toBeDefined();
+    expect(session.messages[0]?.content).toContain('COMPACTED SUMMARY');
+    expect(events.some((e) => e.type === 'done')).toBe(true);
+  });
+
+  it('does not abort the turn when the compaction summary call fails', async () => {
+    const root = await tmpWorkspace();
+    const session = await createSession(root, 'fake', 'fake-model');
+    for (let i = 0; i < 6; i++) session.messages.push({ role: i % 2 === 0 ? 'user' : 'assistant', content: `m${i}` });
+    let call = 0;
+    const provider: LlmProvider = {
+      id: 'fake', name: 'Fake',
+      async stream() {
+        call += 1;
+        if (call === 1) throw new Error('summary boom'); // the compaction summary request
+        return (async function* () { yield { type: 'content', content: 'answer' } as StreamChunk; })();
+      },
+    };
+    const events: AgentEvent[] = [];
+    await runTurn({
+      session,
+      provider,
+      tools: [],
+      config: { permissions: autoPerms, compaction: { auto: true, messageThreshold: 5, keepRecent: 2 } },
+      onEvent: (e) => events.push(e),
+      userMessage: 'go',
+    });
+    expect(events.some((e) => e.type === 'compaction')).toBe(false); // compaction failed silently
+    expect(events.some((e) => e.type === 'done')).toBe(true); // ...but the turn still finished
+    expect(session.messages.some((m) => m.content === 'm0')).toBe(true); // history was left uncompacted
+  });
+
+  it('leaves history untouched when auto-compaction is disabled', async () => {
+    const root = await tmpWorkspace();
+    const session = await createSession(root, 'fake', 'fake-model');
+    for (let i = 0; i < 6; i++) session.messages.push({ role: i % 2 === 0 ? 'user' : 'assistant', content: `m${i}` });
+    const provider = scriptedProvider([[{ type: 'content', content: 'answer' }]]);
+    const events: AgentEvent[] = [];
+    await runTurn({
+      session,
+      provider,
+      tools: [],
+      config: { permissions: autoPerms, compaction: { auto: false, messageThreshold: 5, keepRecent: 2 } },
+      onEvent: (e) => events.push(e),
+      userMessage: 'go',
+    });
+    expect(events.some((e) => e.type === 'compaction')).toBe(false);
   });
 });
 

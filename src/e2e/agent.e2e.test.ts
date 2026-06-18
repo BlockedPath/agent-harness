@@ -12,6 +12,7 @@ const baseConfig: Config = {
   defaultProvider: 'fake',
   defaultModel: 'fake-model',
   permissions: { mode: 'auto', read: 'allow', write: 'allow', execute: 'allow', network: 'ask' },
+  compaction: { auto: false, messageThreshold: 60, keepRecent: 20 },
   providers: { fake: { auth: 'api-key' } },
 };
 

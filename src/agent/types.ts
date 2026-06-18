@@ -7,5 +7,6 @@ export type AgentEvent =
   | { type: 'approval-request'; toolCallId: string; name: string; diff?: string; resolve: (approved: boolean) => void }
   | { type: 'question'; question: string; resolve: (answer: string) => void }
   | { type: 'usage'; usage: { promptTokens: number; completionTokens: number; totalTokens: number } }
+  | { type: 'compaction'; droppedCount: number; keptCount: number }
   | { type: 'error'; message: string }
   | { type: 'done' };

@@ -43,7 +43,7 @@ export async function runHeadless(options: RunHeadlessOptions): Promise<void> {
     session,
     provider,
     tools: ALL_TOOLS,
-    config: { permissions: options.config.permissions },
+    config: { permissions: options.config.permissions, compaction: options.config.compaction },
     userMessage: options.prompt,
     onEvent(event) {
       switch (event.type) {
@@ -70,6 +70,9 @@ export async function runHeadless(options: RunHeadlessOptions): Promise<void> {
           break;
         case 'usage':
           writeErr(`[usage] ${event.usage.totalTokens} tokens (${event.usage.promptTokens} in / ${event.usage.completionTokens} out)\n`);
+          break;
+        case 'compaction':
+          writeErr(`[compaction] summarized ${event.droppedCount} earlier messages (kept ${event.keptCount} recent)\n`);
           break;
         case 'error':
           errorMessage = event.message;

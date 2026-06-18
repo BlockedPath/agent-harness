@@ -11,6 +11,7 @@ const config: Config = {
   defaultProvider: 'codex',
   defaultModel: 'gpt-5.5',
   permissions: { mode: 'on-request', read: 'allow', write: 'ask', execute: 'ask', network: 'ask' },
+  compaction: { auto: false, messageThreshold: 60, keepRecent: 20 },
   providers: { codex: { auth: 'codex-oauth' } },
 };
 
