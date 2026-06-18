@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { appendMessage, createSession, listSessions, listSessionSummaries, loadSession, setSessionModel } from './store.js';
+import { appendCompaction, appendMessage, createSession, listSessions, listSessionSummaries, loadSession, setSessionModel } from './store.js';
 
 async function makeWorkspace(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'harness-session-'));
@@ -40,6 +40,28 @@ describe('session store resume', () => {
     const resumed = await loadSession(workspaceRoot, session.id);
     expect(resumed.model).toBe('gpt-5.4-mini');
     expect(resumed.messages).toEqual([{ role: 'user', content: 'first' }]);
+  });
+
+  it('replays a compaction event by replacing accumulated history with the recorded messages', async () => {
+    const workspaceRoot = await makeWorkspace();
+    const session = await createSession(workspaceRoot, 'codex', 'gpt-5.5');
+    await appendMessage(workspaceRoot, session.id, { role: 'user', content: 'old 1' });
+    await appendMessage(workspaceRoot, session.id, { role: 'assistant', content: 'old 2' });
+    await appendCompaction(workspaceRoot, session.id, {
+      summary: 'condensed',
+      droppedCount: 1,
+      keptCount: 1,
+      at: '2026-06-17T00:00:00.000Z',
+      messages: [{ role: 'user', content: 'summary message' }, { role: 'assistant', content: 'old 2' }],
+    });
+    await appendMessage(workspaceRoot, session.id, { role: 'user', content: 'after compaction' });
+
+    const resumed = await loadSession(workspaceRoot, session.id);
+    expect(resumed.messages).toEqual([
+      { role: 'user', content: 'summary message' },
+      { role: 'assistant', content: 'old 2' },
+      { role: 'user', content: 'after compaction' },
+    ]);
   });
 
   it('throws for a session that was never created', async () => {

@@ -42,6 +42,11 @@ describe('parseCommand', () => {
     expect(parseCommand('/sessions', CODEX_MODELS)).toEqual({ kind: 'open-screen', screen: 'sessions' });
   });
 
+  it('triggers compaction for /compact', () => {
+    expect(parseCommand('/compact', CODEX_MODELS)).toEqual({ kind: 'compact' });
+    expect(HELP_TEXT).toContain('/compact');
+  });
+
   it('clears the session for /clear and its /new alias', () => {
     expect(parseCommand('/clear', CODEX_MODELS)).toEqual({ kind: 'clear' });
     expect(parseCommand('/new', CODEX_MODELS)).toEqual({ kind: 'clear' });

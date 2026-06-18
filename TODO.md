@@ -33,8 +33,10 @@ Curated follow-ups, informed by the current code. Roughly highest-value first.
   assistant/tool message pair in the session log.
 
 ### Product / UX
-- Add a `/compact` command (and/or auto-compaction). History is hard-trimmed to the
-  last 40 messages in `src/agent/loop.ts` (`trimMessages`), which silently drops context.
+- ~~Add a `/compact` command (and/or auto-compaction). History is hard-trimmed to the
+  last 40 messages in `src/agent/loop.ts` (`trimMessages`), which silently drops context.~~
+  (done: `/compact` + opt-in auto-compaction in `src/agent/compaction.ts`, replayable
+  `compaction` session events, and `trimMessages` now preserves the summary.)
 - Stream tool-call arguments into the tool card as they arrive; today the card only
   appears after the full tool call is aggregated.
 - Persist cumulative token usage to the session file and show it on resume.

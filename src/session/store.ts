@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ChatMessage } from '../llm/types.js';
-import type { Session, SessionEvent } from './types.js';
+import type { CompactionData, Session, SessionEvent } from './types.js';
 
 export async function createSession(workspaceRoot: string, providerId: string, model: string): Promise<Session> {
   const id = `${new Date().toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(4).toString('hex')}`;
@@ -26,6 +26,10 @@ export async function setSessionModel(workspaceRoot: string, sessionId: string, 
   await appendEvent(workspaceRoot, sessionId, { type: 'model-changed', data: { model } });
 }
 
+export async function appendCompaction(workspaceRoot: string, sessionId: string, data: CompactionData): Promise<void> {
+  await appendEvent(workspaceRoot, sessionId, { type: 'compaction', data });
+}
+
 export async function loadSession(workspaceRoot: string, sessionId: string): Promise<Session> {
   const raw = await fs.readFile(path.join(sessionDir(workspaceRoot), `${sessionId}.jsonl`), 'utf8');
   let session: Session | null = null;
@@ -45,6 +49,12 @@ export async function loadSession(workspaceRoot: string, sessionId: string): Pro
     if (event.type === 'model-changed') {
       if (!session) throw new Error(`Session ${sessionId} is missing creation event.`);
       session.model = event.data.model;
+    }
+    if (event.type === 'compaction') {
+      if (!session) throw new Error(`Session ${sessionId} is missing creation event.`);
+      // Compaction replaces the accumulated history with the recorded summary +
+      // kept tail; messages appended after this event continue from there.
+      session.messages = event.data.messages.slice();
     }
   }
   if (!session) throw new Error(`Session not found: ${sessionId}`);

@@ -8,6 +8,7 @@ import type { PermissionConfig } from '../policy/types.js';
 import { requiresApproval } from '../policy/approval.js';
 import { classifyCommand } from '../policy/classifier.js';
 import { appendMessage } from '../session/store.js';
+import { compactSession, COMPACTION_SUMMARY_PREFIX, type CompactionConfig } from './compaction.js';
 import type { Session } from '../session/types.js';
 import { resolveWorkspacePath } from '../sandbox/workspace-boundary.js';
 import { toProviderTools } from '../tools/registry.js';
@@ -18,7 +19,7 @@ export interface RunTurnOptions {
   session: Session;
   provider: LlmProvider;
   tools: ToolDefinitionFull[];
-  config: { permissions: PermissionConfig; maxIterations?: number };
+  config: { permissions: PermissionConfig; maxIterations?: number; compaction?: CompactionConfig };
   onEvent: (event: AgentEvent) => void;
   userMessage?: string;
 }
@@ -29,6 +30,18 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
     options.session.messages.push(msg);
     await appendMessage(options.session.workspaceRoot, options.session.id, msg);
   }
+  // Auto-compact before the turn runs, while history is in a clean state (the
+  // last turn ended on assistant content, so no tool_call is left unpaired).
+  // Best-effort: a failed summary must never abort the turn — fall back to the
+  // full history (still bounded by trimMessages below).
+  const compaction = options.config.compaction;
+  if (compaction?.auto && options.session.messages.length > compaction.messageThreshold) {
+    try {
+      const result = await compactSession({ session: options.session, provider: options.provider, keepRecent: compaction.keepRecent });
+      if (result) options.onEvent({ type: 'compaction', droppedCount: result.droppedCount, keptCount: result.keptCount });
+    } catch { /* keep the uncompacted history */ }
+  }
+
   const context = await loadWorkspaceContext(options.session.workspaceRoot);
   const system: ChatMessage = { role: 'system', content: buildSystemPrompt(context, options.tools) };
   const maxIterations = options.config.maxIterations ?? 25;
@@ -103,11 +116,24 @@ export function parseArgs(raw: string): ParseArgsResult {
   if (!raw || !raw.trim()) return { ok: true, value: {} };
   try { return { ok: true, value: JSON.parse(raw) }; } catch (err) { return { ok: false, error: err instanceof Error ? err.message : String(err) }; }
 }
+export const HISTORY_WINDOW = 40;
+const isCompactionSummary = (message: ChatMessage | undefined): boolean => message?.role === 'user' && message.content.startsWith(COMPACTION_SUMMARY_PREFIX);
+const truncateToolContent = (message: ChatMessage): ChatMessage => message.role === 'tool' && message.content.length > 4000 ? { ...message, content: `${message.content.slice(0, 4000)}\n[trimmed ${Buffer.byteLength(message.content.slice(4000), 'utf8')} bytes]` } : message;
 export function trimMessages(messages: ChatMessage[]): ChatMessage[] {
-  const window = messages.slice(-40);
+  // A leading compaction summary must outlive the window slice: dropping it would
+  // silently re-trim the context compaction just freed and, if the new head turned
+  // out to be an assistant message, make the request Anthropic-invalid. Reserve a
+  // slot for the summary, trim the rest, then reattach (merging into a leading user
+  // message so we never emit two consecutive user turns).
+  const summary = isCompactionSummary(messages[0]) ? messages[0] : undefined;
+  const body = summary ? messages.slice(1) : messages;
+  const window = body.slice(-(summary ? HISTORY_WINDOW - 1 : HISTORY_WINDOW));
   let start = 0;
   while (start < window.length && window[start]?.role === 'tool') start++;
-  return window.slice(start).map((message) => message.role === 'tool' && message.content.length > 4000 ? { ...message, content: `${message.content.slice(0, 4000)}\n[trimmed ${Buffer.byteLength(message.content.slice(4000), 'utf8')} bytes]` } : message);
+  const trimmed = window.slice(start).map(truncateToolContent);
+  if (!summary) return trimmed;
+  if (trimmed[0]?.role === 'user') return [{ role: 'user', content: `${summary.content}\n\n--- Recent conversation continues ---\n\n${trimmed[0].content}` }, ...trimmed.slice(1)];
+  return [summary, ...trimmed];
 }
 async function ensureToolResultsPaired(options: RunTurnOptions): Promise<void> {
   const lastAssistant = [...options.session.messages].reverse().find((m) => m.role === 'assistant' && m.toolCalls?.length);
