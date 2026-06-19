@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Text, useApp } from 'ink';
 import type { Config } from '../config/schema.js';
-import { createProvider } from '../llm/registry.js';
+import { createProvider, getProviderCredentialStatus, type ProviderCredentialStatus } from '../llm/registry.js';
 import { CODEX_MODELS } from '../llm/models.js';
 import { loginWithCodexBrowser } from '../llm/providers/codex-login.js';
 import { CodexAuthError } from '../llm/providers/codex-oauth.js';
@@ -12,13 +12,14 @@ import { parseCommand } from './commands.js';
 import type { Session } from '../session/types.js';
 import { ALL_TOOLS } from '../tools/registry.js';
 import { ApprovalModal } from './components/approval-modal.js';
+import { CredentialNoticePanel } from './components/credential-notice.js';
 import { InputBar } from './components/input-bar.js';
 import { LoginProviders } from './components/login-providers.js';
 import { ModelPicker } from './components/model-picker.js';
 import { SessionPicker } from './components/session-picker.js';
 import { Messages } from './components/messages.js';
 import { ToolCard } from './components/tool-card.js';
-import { TuiStoreProvider, useTuiStore } from './store.js';
+import { TuiStoreProvider, useTuiStore, type CredentialNotice } from './store.js';
 
 export interface AppProps {
   workspaceRoot: string;
@@ -40,16 +41,46 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const running = useRef(false);
   const pendingRetry = useRef<string | null>(null);
+  const credentialCheckStarted = useRef(false);
 
   useEffect(() => {
-    void (async () => setSession(sessionId ? await loadSession(workspaceRoot, sessionId) : await createSession(workspaceRoot, providerId, model)))();
+    void (async () => {
+      const nextSession = sessionId ? await loadSession(workspaceRoot, sessionId) : await createSession(workspaceRoot, providerId, model);
+      setSession(nextSession);
+      setActiveModel(nextSession.model);
+    })();
   }, [workspaceRoot, providerId, model, sessionId]);
+
+  useEffect(() => {
+    if (credentialCheckStarted.current) return;
+    credentialCheckStarted.current = true;
+    void getProviderCredentialStatus({ ...config, defaultProvider: providerId })
+      .then((status) => {
+        const notice = buildCredentialNotice(status);
+        if (!notice) return;
+        dispatch({ type: 'set-credential-notice', notice });
+        dispatch({ type: 'set-screen', screen: notice.action === 'login' ? 'login' : 'credentials' });
+      })
+      .catch((error: unknown) => {
+        dispatch({ type: 'add-error', severity: 'provider', content: `Credential check failed: ${error instanceof Error ? error.message : String(error)}` });
+      });
+  }, [config, providerId, dispatch]);
 
   const runAgentTurn = useCallback((message: string) => {
     if (!session || running.current) return;
     running.current = true;
     dispatch({ type: 'add-message', message: { role: 'user', content: message } });
     dispatch({ type: 'set-disabled', disabled: true });
+    const routeAuthFailure = (content: string) => {
+      // Auth failed mid-turn: stash the message, surface the error, and guide
+      // the user to re-login. The turn is retried automatically after sign-in.
+      pendingRetry.current = message;
+      dispatch({ type: 'add-error', severity: 'provider', content });
+      dispatch({ type: 'set-credential-notice', notice: buildAuthRetryNotice(providerId) });
+      dispatch({ type: 'add-message', message: { role: 'assistant', content: 'Sign in again to continue. Your last message will be retried automatically.' } });
+      dispatch({ type: 'set-screen', screen: 'login' });
+    };
+
 
     void (async () => {
       const provider = await createProvider({ ...config, defaultProvider: providerId });
@@ -69,7 +100,8 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
           if (event.type === 'usage') dispatch({ type: 'usage', usage: event.usage });
           if (event.type === 'compaction') dispatch({ type: 'add-message', message: { role: 'assistant', content: `Auto-compacted ${event.droppedCount} earlier messages to free up context (kept ${event.keptCount} recent).` } });
           if (event.type === 'error') {
-            dispatch({ type: 'add-error', severity: 'provider', content: event.message });
+            if (isAuthError(event.message)) routeAuthFailure(event.message);
+            else dispatch({ type: 'add-error', severity: 'provider', content: event.message });
             dispatch({ type: 'set-disabled', disabled: false });
             running.current = false;
           }
@@ -84,12 +116,7 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
       running.current = false;
       dispatch({ type: 'set-disabled', disabled: false });
       if (isAuthError(error)) {
-        // Auth failed mid-turn: stash the message, surface the error, and guide
-        // the user to re-login. The turn is retried automatically after sign-in.
-        pendingRetry.current = message;
-        dispatch({ type: 'add-error', severity: 'provider', content: error instanceof Error ? error.message : String(error) });
-        dispatch({ type: 'add-message', message: { role: 'assistant', content: 'Sign in again to continue — choose a provider below. Your last message will be retried automatically.' } });
-        dispatch({ type: 'set-screen', screen: 'login' });
+        routeAuthFailure(error instanceof Error ? error.message : String(error));
       } else {
         dispatch({ type: 'add-error', severity: 'provider', content: error instanceof Error ? error.message : String(error) });
       }
@@ -105,6 +132,7 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
     void loginWithCodexBrowser({ credentialsPath: config.providers.codex?.oauthCredentialsPath, sourceCredentialsPath: config.providers.codex?.oauthSourceCredentialsPath })
       .then((credentialsPath) => {
         dispatch({ type: 'add-message', message: { role: 'assistant', content: `Codex login complete. Credentials saved at ${credentialsPath}.` } });
+        dispatch({ type: 'set-credential-notice', notice: null });
         dispatch({ type: 'set-screen', screen: 'chat' });
         dispatch({ type: 'set-disabled', disabled: false });
         running.current = false;
@@ -209,10 +237,18 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
     <Box flexDirection="column" width="100%" minHeight={24} borderStyle="round" paddingX={1}>
       <Box flexDirection="column" flexGrow={1} minHeight={14} paddingY={1}>
         <Messages />
+        {state.screen === 'credentials' && state.credentialNotice && (
+          <CredentialNoticePanel
+            notice={state.credentialNotice}
+            onCancel={() => dispatch({ type: 'set-screen', screen: 'chat' })}
+            onLogin={() => dispatch({ type: 'set-screen', screen: 'login' })}
+          />
+        )}
         {state.screen === 'login' && (
           <LoginProviders
             disabled={state.inputDisabled}
-            onCancel={() => dispatch({ type: 'set-screen', screen: 'chat' })}
+            reason={state.credentialNotice?.action === 'login' ? state.credentialNotice.message : undefined}
+            onCancel={() => dispatch({ type: 'set-screen', screen: state.credentialNotice ? 'credentials' : 'chat' })}
             onSelect={(selectedProvider) => {
               if (selectedProvider === 'codex') startCodexLogin();
             }}
@@ -247,11 +283,42 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
       </Box>
       <InputBar onSubmit={submit} />
       <Box justifyContent="space-between" paddingX={1}>
-        <Text dimColor>{state.inputDisabled ? 'working…' : 'ready'}</Text>
+        <Text dimColor>{state.inputDisabled ? 'working…' : state.credentialNotice ? 'auth required' : 'ready'}</Text>
         <Text dimColor>{providerId}/{activeModel}{state.usage ? ` · ${formatTokens(state.usage.totalTokens)} tok` : ''}</Text>
       </Box>
     </Box>
   );
+}
+
+export function buildCredentialNotice(status: ProviderCredentialStatus): CredentialNotice | null {
+  if (status.ok) return null;
+  if (status.action === 'login') {
+    const envVar = status.envVar ?? 'CODEX_ACCESS_TOKEN';
+    return {
+      providerId: status.providerId,
+      action: 'login',
+      envVar,
+      message: `Codex is selected, but no OAuth credentials were found. Press Enter to sign in with Codex in your browser, or set ${envVar} before starting the TUI.`,
+    };
+  }
+  if (status.action === 'set-env') {
+    return {
+      providerId: status.providerId,
+      action: 'set-env',
+      envVar: status.envVar,
+      message: `${status.message}. Browser login is only available for Codex OAuth.`,
+    };
+  }
+  return { providerId: status.providerId, action: 'fix-config', message: status.message };
+}
+
+function buildAuthRetryNotice(providerId: string): CredentialNotice {
+  return {
+    providerId,
+    action: 'login',
+    envVar: 'CODEX_ACCESS_TOKEN',
+    message: 'Codex authentication failed. Press Enter to sign in again with Codex in your browser, or set CODEX_ACCESS_TOKEN before starting the TUI.',
+  };
 }
 
 function formatTokens(total: number): string {

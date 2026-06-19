@@ -17,8 +17,8 @@
 - ~~Add a concise session list/resume UI.~~ (done: `/resume`)
 - ~~Show token usage in the TUI when providers emit usage chunks.~~ (done)
 - ~~Add clearer error rendering for provider, tool, and approval failures.~~ (done)
-- Add a first-run state that explains how to authenticate providers. **(next up)** — detect
-  missing credentials at startup and route into the existing `/login` flow.
+- ~~Add a first-run state that explains how to authenticate providers.~~ (done) — detects
+  missing credentials at startup; Codex routes into `/login`, API-key providers show env-var guidance.
 
 ## Recommendations
 

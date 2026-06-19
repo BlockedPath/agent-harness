@@ -18,9 +18,15 @@ export interface ApprovalState {
   resolve: (approved: boolean) => void;
 }
 
-export type TuiScreen = 'chat' | 'login' | 'models' | 'sessions';
+export type TuiScreen = 'chat' | 'credentials' | 'login' | 'models' | 'sessions';
 
 export type ErrorSeverity = 'provider' | 'tool' | 'approval';
+export interface CredentialNotice {
+  providerId: string;
+  action: 'login' | 'set-env' | 'fix-config';
+  message: string;
+  envVar?: string;
+}
 export interface ErrorMessage {
   role: 'error';
   severity: ErrorSeverity;
@@ -36,6 +42,7 @@ export interface TuiState {
   inputDisabled: boolean;
   question: { question: string; resolve: (answer: string) => void } | null;
   screen: TuiScreen;
+  credentialNotice: CredentialNotice | null;
   usage: { promptTokens: number; completionTokens: number; totalTokens: number } | null;
 }
 
@@ -50,6 +57,7 @@ type Action =
   | { type: 'question'; question: TuiState['question'] }
   | { type: 'set-disabled'; disabled: boolean }
   | { type: 'set-screen'; screen: TuiScreen }
+  | { type: 'set-credential-notice'; notice: CredentialNotice | null }
   | { type: 'usage'; usage: { promptTokens: number; completionTokens: number; totalTokens: number } }
   | { type: 'reset' }
   | { type: 'flush-stream' };
@@ -62,6 +70,7 @@ export const initialState: TuiState = {
   inputDisabled: false,
   question: null,
   screen: 'chat',
+  credentialNotice: null,
   usage: null,
 };
 
@@ -119,6 +128,8 @@ export function reducer(state: TuiState, action: Action): TuiState {
       return { ...state, inputDisabled: action.disabled };
     case 'set-screen':
       return { ...state, screen: action.screen };
+    case 'set-credential-notice':
+      return { ...state, credentialNotice: action.notice };
     case 'usage':
       return {
         ...state,
@@ -129,7 +140,7 @@ export function reducer(state: TuiState, action: Action): TuiState {
         },
       };
     case 'reset':
-      return { ...initialState };
+      return { ...initialState, credentialNotice: state.credentialNotice, screen: state.credentialNotice ? state.screen : initialState.screen };
     case 'flush-stream':
       return state.streamingText ? { ...state, messages: [...state.messages, { role: 'assistant' as const, content: state.streamingText }].slice(-200), streamingText: '' } : state;
   }
