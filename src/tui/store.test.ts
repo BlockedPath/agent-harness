@@ -91,6 +91,35 @@ describe('tui reducer — errors', () => {
   });
 });
 
+describe('tui reducer — add-error tool-card cleanup', () => {
+  it('transitions a pending tool card to error with the failure message as output', () => {
+    const pending = reducer(initialState, { type: 'tool-call-delta', id: 'call_1', name: 'read_file', partialArgs: '{"path' });
+    const next = reducer(pending, { type: 'add-error', severity: 'provider', content: 'stream failed' });
+    expect(next.toolCards[0]).toMatchObject({ id: 'call_1', name: 'read_file', input: '{"path', status: 'error', output: 'stream failed' });
+    expect(next.messages.at(-1)).toEqual({ role: 'error', severity: 'provider', content: 'stream failed' });
+  });
+
+  it('transitions a running tool card to error', () => {
+    const running = reducer(initialState, { type: 'tool-start', id: 'call_1', name: 'bash', input: { command: 'ls' } });
+    const next = reducer(running, { type: 'add-error', severity: 'provider', content: 'stream failed' });
+    expect(next.toolCards[0]).toMatchObject({ id: 'call_1', status: 'error', output: 'stream failed' });
+  });
+
+  it('does not downgrade or overwrite a completed tool card', () => {
+    const started = reducer(initialState, { type: 'tool-start', id: 'call_1', name: 'bash', input: { command: 'ls' } });
+    const done = reducer(started, { type: 'tool-done', id: 'call_1', output: 'ok', ok: true });
+    const next = reducer(done, { type: 'add-error', severity: 'provider', content: 'stream failed' });
+    expect(next.toolCards[0]).toMatchObject({ id: 'call_1', status: 'done', output: 'ok' });
+  });
+
+  it('does not overwrite an already-errored tool card output', () => {
+    const started = reducer(initialState, { type: 'tool-start', id: 'call_1', name: 'bash', input: { command: 'ls' } });
+    const errored = reducer(started, { type: 'tool-done', id: 'call_1', output: 'boom', ok: false });
+    const next = reducer(errored, { type: 'add-error', severity: 'provider', content: 'stream failed' });
+    expect(next.toolCards[0]).toMatchObject({ id: 'call_1', status: 'error', output: 'boom' });
+  });
+});
+
 describe('tui reducer — credential notice', () => {
   it('stores and clears a startup credential notice', () => {
     const notice = { providerId: 'anthropic', action: 'set-env' as const, envVar: 'ANTHROPIC_API_KEY', message: 'Set ANTHROPIC_API_KEY.' };
