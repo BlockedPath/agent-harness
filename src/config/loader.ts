@@ -11,6 +11,7 @@ const DEFAULT_CONFIG: Config = {
   defaultModel: DEFAULT_CODEX_MODEL,
   permissions: { mode: 'on-request', read: 'allow', write: 'ask', execute: 'ask', network: 'ask' },
   compaction: { auto: false, messageThreshold: 60, keepRecent: 20 },
+  tools: { deny: [] },
   providers: {
     codex: { auth: 'codex-oauth', oauthTokenEnv: 'CODEX_ACCESS_TOKEN', oauthCredentialsPath: '.harness/auth/codex.json', oauthSourceCredentialsPath: '~/.codex/auth.json' },
     anthropic: { auth: 'api-key', apiKeyEnv: 'ANTHROPIC_API_KEY' },
