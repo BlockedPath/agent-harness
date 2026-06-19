@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Box, Text, useApp } from 'ink';
+import { Box, useApp } from 'ink';
 import type { Config } from '../config/schema.js';
 import { createProvider, getProviderCredentialStatus, type ProviderCredentialStatus } from '../llm/registry.js';
 import { CODEX_MODELS } from '../llm/models.js';
@@ -19,6 +19,7 @@ import { ModelPicker } from './components/model-picker.js';
 import { SessionPicker } from './components/session-picker.js';
 import { Messages } from './components/messages.js';
 import { ToolCard } from './components/tool-card.js';
+import { StatusFooter } from './components/status-footer.js';
 import { TuiStoreProvider, useTuiStore, type CredentialNotice } from './store.js';
 
 export interface AppProps {
@@ -283,10 +284,12 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
         <ApprovalModal />
       </Box>
       <InputBar onSubmit={submit} />
-      <Box justifyContent="space-between" paddingX={1}>
-        <Text dimColor>{state.inputDisabled ? 'working…' : state.credentialNotice ? 'auth required' : 'ready'}</Text>
-        <Text dimColor>{providerId}/{activeModel}{state.usage ? ` · ${formatTokens(state.usage.totalTokens)} tok` : ''}</Text>
-      </Box>
+      <StatusFooter
+        status={state.inputDisabled ? 'working…' : state.credentialNotice ? 'auth required' : 'ready'}
+        providerId={providerId}
+        model={activeModel}
+        usage={state.usage}
+      />
     </Box>
   );
 }
@@ -322,9 +325,6 @@ function buildAuthRetryNotice(providerId: string): CredentialNotice {
   };
 }
 
-function formatTokens(total: number): string {
-  return total >= 1000 ? `${(total / 1000).toFixed(1)}k` : String(total);
-}
 
 export function isAuthError(error: unknown): boolean {
   if (error instanceof CodexAuthError) return true;
