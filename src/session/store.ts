@@ -6,8 +6,9 @@ import type { CompactionData, Session, SessionEvent } from './types.js';
 
 export async function createSession(workspaceRoot: string, providerId: string, model: string): Promise<Session> {
   const id = `${new Date().toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(4).toString('hex')}`;
-  const session: Session = { id, workspaceRoot, providerId, model, messages: [], createdAt: new Date().toISOString() };
-  await appendEvent(workspaceRoot, id, { type: 'session-created', data: { id, workspaceRoot, providerId, model, createdAt: session.createdAt } });
+  const usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+  const session: Session = { id, workspaceRoot, providerId, model, messages: [], createdAt: new Date().toISOString(), usage };
+  await appendEvent(workspaceRoot, id, { type: 'session-created', data: { id, workspaceRoot, providerId, model, createdAt: session.createdAt, usage } });
   return session;
 }
 
@@ -28,6 +29,10 @@ export async function setSessionModel(workspaceRoot: string, sessionId: string, 
 
 export async function appendCompaction(workspaceRoot: string, sessionId: string, data: CompactionData): Promise<void> {
   await appendEvent(workspaceRoot, sessionId, { type: 'compaction', data });
+}
+
+export async function appendUsage(workspaceRoot: string, sessionId: string, usage: { promptTokens: number; completionTokens: number; totalTokens: number }): Promise<void> {
+  await appendEvent(workspaceRoot, sessionId, { type: 'usage', data: usage });
 }
 
 export async function loadSession(workspaceRoot: string, sessionId: string): Promise<Session> {
@@ -55,6 +60,15 @@ export async function loadSession(workspaceRoot: string, sessionId: string): Pro
       // Compaction replaces the accumulated history with the recorded summary +
       // kept tail; messages appended after this event continue from there.
       session.messages = event.data.messages.slice();
+    }
+    if (event.type === 'usage') {
+      if (!session) throw new Error(`Session ${sessionId} is missing creation event.`);
+      const current = session.usage ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+      session.usage = {
+        promptTokens: current.promptTokens + event.data.promptTokens,
+        completionTokens: current.completionTokens + event.data.completionTokens,
+        totalTokens: current.totalTokens + event.data.totalTokens,
+      };
     }
   }
   if (!session) throw new Error(`Session not found: ${sessionId}`);
