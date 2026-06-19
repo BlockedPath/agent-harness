@@ -20,6 +20,8 @@ export interface RunHeadlessOptions {
   writeErr?: (text: string) => void;
   /** Provider override; defaults to building one from config. Used for testing. */
   provider?: LlmProvider;
+  /** Emit one machine-readable JSON result line instead of streaming text/status. */
+  json?: boolean;
 }
 
 /**
@@ -35,6 +37,62 @@ export async function runHeadless(options: RunHeadlessOptions): Promise<void> {
     ? await loadSession(options.workspaceRoot, options.sessionId)
     : await createSession(options.workspaceRoot, options.providerId, options.model);
   const provider = options.provider ?? await createProvider({ ...options.config, defaultProvider: options.providerId });
+
+  if (options.json) {
+    let content = '';
+    const toolCalls = new Map<string, { name: string; input: unknown; ok: boolean | null; output: string; error: string | null }>();
+    let usage: { promptTokens: number; completionTokens: number; totalTokens: number } | null = null;
+    let errorMessage: string | null = null;
+
+    await runTurn({
+      session,
+      provider,
+      tools: ALL_TOOLS,
+      config: { permissions: options.config.permissions, compaction: options.config.compaction },
+      userMessage: options.prompt,
+      onEvent(event) {
+        switch (event.type) {
+          case 'content':
+            content += event.text;
+            break;
+          case 'tool-start':
+            toolCalls.set(event.toolCallId, { name: event.name, input: event.input, ok: null, output: '', error: null });
+            break;
+          case 'tool-done': {
+            const toolCall = toolCalls.get(event.toolCallId);
+            if (toolCall) {
+              toolCall.ok = event.result.ok;
+              toolCall.output = event.result.output;
+              toolCall.error = event.result.error ?? null;
+            }
+            break;
+          }
+          case 'approval-request':
+            event.resolve(!!options.autoApprove);
+            break;
+          case 'question':
+            event.resolve('No answer available; running non-interactively.');
+            break;
+          case 'usage':
+            usage = usage
+              ? {
+                  promptTokens: usage.promptTokens + event.usage.promptTokens,
+                  completionTokens: usage.completionTokens + event.usage.completionTokens,
+                  totalTokens: usage.totalTokens + event.usage.totalTokens,
+                }
+              : { ...event.usage };
+            break;
+          case 'error':
+            errorMessage = event.message;
+            break;
+        }
+      },
+    });
+
+    write(JSON.stringify({ ok: !errorMessage, sessionId: session.id, content, toolCalls: [...toolCalls.values()], usage, error: errorMessage }) + '\n');
+    if (errorMessage) throw new Error(errorMessage);
+    return;
+  }
 
   let errorMessage: string | null = null;
   let wroteContent = false;

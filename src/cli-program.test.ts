@@ -59,4 +59,23 @@ describe('createCliProgram', () => {
       autoApprove: true,
     });
   });
+
+  it('passes --json through to headless print runs', async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'harness-cli-'));
+    const headlessCalls: unknown[] = [];
+    const program = createCliProgram({
+      cwd: workspaceRoot,
+      renderApp: () => {},
+      runHeadless: async (options) => { headlessCalls.push(options); },
+    });
+
+    await program.parseAsync(['node', 'harness', '--print', 'x', '--json'], { from: 'node' });
+
+    expect(headlessCalls).toHaveLength(1);
+    expect(headlessCalls[0]).toMatchObject({
+      workspaceRoot,
+      prompt: 'x',
+      json: true,
+    });
+  });
 });

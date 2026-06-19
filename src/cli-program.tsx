@@ -19,6 +19,7 @@ interface CliOptions {
   config?: string;
   print?: string;
   yes?: boolean;
+  json?: boolean;
 }
 
 export function createCliProgram({ cwd = process.cwd(), renderApp, runHeadless: runHeadlessImpl = runHeadless }: CreateCliProgramOptions): Command {
@@ -32,6 +33,7 @@ export function createCliProgram({ cwd = process.cwd(), renderApp, runHeadless: 
     .option('--config <path>', 'config file path')
     .option('-p, --print <prompt>', 'run a single prompt non-interactively and print the result')
     .option('-y, --yes', 'auto-approve tools that would otherwise prompt (only with --print)')
+    .option('--json', 'with --print, emit a single JSON result object to stdout')
     .action(async (workspaceArg: string, options: CliOptions) => {
       const workspaceRoot = path.resolve(workspaceArg);
       if (!fs.existsSync(workspaceRoot) || !fs.statSync(workspaceRoot).isDirectory()) throw new Error(`Workspace is not a directory: ${workspaceRoot}`);
@@ -39,7 +41,7 @@ export function createCliProgram({ cwd = process.cwd(), renderApp, runHeadless: 
       const providerId = options.provider ?? config.defaultProvider;
       const model = options.model ?? config.defaultModel;
       if (options.print !== undefined) {
-        await runHeadlessImpl({ workspaceRoot, config, providerId, model, prompt: options.print, sessionId: options.session, autoApprove: options.yes });
+        await runHeadlessImpl({ workspaceRoot, config, providerId, model, prompt: options.print, sessionId: options.session, autoApprove: options.yes, json: options.json });
         return;
       }
       renderApp(<App workspaceRoot={workspaceRoot} config={config} providerId={providerId} model={model} sessionId={options.session} />);
