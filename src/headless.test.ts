@@ -6,7 +6,7 @@ import type { Config } from './config/schema.js';
 import type { LlmProvider, StreamChunk } from './llm/types.js';
 import { loadSession } from './session/store.js';
 import { runHeadless } from './headless.js';
-import { scriptedProvider } from './test/fake-provider.js';
+import { failingStreamProvider, scriptedProvider } from './test/fake-provider.js';
 
 const config: Config = {
   defaultProvider: 'codex',
@@ -115,5 +115,107 @@ describe('runHeadless', () => {
     expect(stderr.match(/\[tool→\] git_status/g) ?? []).toHaveLength(1);
     expect(stderr.indexOf('[tool→] git_status')).toBeGreaterThanOrEqual(0);
     expect(stderr.indexOf('[tool] git_status')).toBeGreaterThan(stderr.indexOf('[tool→] git_status'));
+  });
+
+  it('emits a single JSON result for a successful run', async () => {
+    const out: string[] = [];
+    const err: string[] = [];
+    await runHeadless({
+      workspaceRoot: await workspace(),
+      config,
+      providerId: 'codex',
+      model: 'gpt-5.5',
+      prompt: 'hi',
+      provider: scriptedProvider([[
+        { type: 'content', content: 'Hello world' },
+        { type: 'usage', usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 } },
+      ]]),
+      json: true,
+      write: (text) => out.push(text),
+      writeErr: (text) => err.push(text),
+    });
+
+    expect(out).toHaveLength(1);
+    expect(err.join('')).toBe('');
+    expect(out[0]?.endsWith('\n')).toBe(true);
+    const result = JSON.parse(out[0] ?? '') as {
+      ok: boolean;
+      sessionId: string;
+      content: string;
+      toolCalls: unknown[];
+      usage: { promptTokens: number; completionTokens: number; totalTokens: number } | null;
+      error: string | null;
+    };
+    expect(result.ok).toBe(true);
+    expect(result.sessionId).toBeTruthy();
+    expect(result.content).toBe('Hello world');
+    expect(result.toolCalls).toEqual([]);
+    expect(result.usage?.totalTokens).toBe(3);
+    expect(result.error).toBeNull();
+  });
+
+  it('includes tool call results in JSON mode', async () => {
+    const root = await workspace();
+    await fs.writeFile(path.join(root, 'a.txt'), 'file content for json mode\n');
+    const out: string[] = [];
+    await runHeadless({
+      workspaceRoot: root,
+      config,
+      providerId: 'codex',
+      model: 'gpt-5.5',
+      prompt: 'read a.txt',
+      provider: scriptedProvider([
+        [{ type: 'tool_call', toolCall: { id: 't1', name: 'read_file', arguments: JSON.stringify({ path: 'a.txt' }) } }],
+        [{ type: 'content', content: 'done' }],
+      ]),
+      json: true,
+      write: (text) => out.push(text),
+      writeErr: () => {},
+    });
+
+    expect(out).toHaveLength(1);
+    const result = JSON.parse(out[0] ?? '') as {
+      ok: boolean;
+      content: string;
+      toolCalls: Array<{ name: string; input: unknown; ok: boolean | null; output: string; error: string | null }>;
+      usage: unknown;
+      error: string | null;
+    };
+    expect(result.ok).toBe(true);
+    expect(result.content).toBe('done');
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0]).toMatchObject({ name: 'read_file', ok: true, error: null });
+    expect(result.toolCalls[0]?.output).toContain('file content for json mode');
+    expect(result.usage).toBeNull();
+    expect(result.error).toBeNull();
+  });
+
+  it('writes JSON before throwing on errors', async () => {
+    const out: string[] = [];
+    await expect(runHeadless({
+      workspaceRoot: await workspace(),
+      config,
+      providerId: 'codex',
+      model: 'gpt-5.5',
+      prompt: 'go',
+      provider: failingStreamProvider([], 'stream aborted'),
+      json: true,
+      write: (text) => out.push(text),
+      writeErr: () => {},
+    })).rejects.toThrow('stream aborted');
+
+    expect(out).toHaveLength(1);
+    const result = JSON.parse(out[0] ?? '') as {
+      ok: boolean;
+      content: string;
+      toolCalls: unknown[];
+      usage: unknown;
+      error: string | null;
+    };
+    expect(result.ok).toBe(false);
+    expect(result.content).toBe('');
+    expect(result.toolCalls).toEqual([]);
+    expect(result.usage).toBeNull();
+    expect(result.error).toBe('stream aborted');
   });
 });
