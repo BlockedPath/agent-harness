@@ -264,6 +264,7 @@ describe('runTurn transient provider retry', () => {
         if (calls === 1) {
           return (async function* () {
             throw Object.assign(new Error('503'), { status: 503 });
+            yield { type: 'content', content: 'unreachable' } as StreamChunk;
           })();
         }
         return (async function* () {
