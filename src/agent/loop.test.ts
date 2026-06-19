@@ -251,6 +251,117 @@ describe('runTurn stream failure mid-turn', () => {
   });
 });
 
+describe('runTurn transient provider retry', () => {
+  it('retries a transient failure before chunks and commits the successful retry once', async () => {
+    const root = await tmpWorkspace();
+    const session = await createSession(root, 'fake', 'fake-model');
+    let calls = 0;
+    const provider: LlmProvider = {
+      id: 'fake',
+      name: 'Fake',
+      async stream() {
+        calls += 1;
+        if (calls === 1) {
+          return (async function* () {
+            throw Object.assign(new Error('503'), { status: 503 });
+            yield { type: 'content', content: 'unreachable' } as StreamChunk;
+          })();
+        }
+        return (async function* () {
+          yield { type: 'content', content: 'ok' } as StreamChunk;
+        })();
+      },
+    };
+    const events: AgentEvent[] = [];
+
+    await runTurn({ session, provider, tools: [], config: { permissions: autoPerms, retryBackoffMs: [0, 0, 0] }, onEvent: (e) => events.push(e), userMessage: 'go' });
+
+    expect(calls).toBe(2);
+    expect(events.filter((e) => e.type === 'content')).toEqual([{ type: 'content', text: 'ok' }]);
+    expect(events.some((e) => e.type === 'error')).toBe(false);
+    expect(events.some((e) => e.type === 'done')).toBe(true);
+    expect(session.messages.find((m) => m.role === 'assistant')).toMatchObject({ role: 'assistant', content: 'ok' });
+  });
+
+  it('does not retry a transient failure after content streamed', async () => {
+    const root = await tmpWorkspace();
+    const session = await createSession(root, 'fake', 'fake-model');
+    let calls = 0;
+    const provider: LlmProvider = {
+      id: 'fake',
+      name: 'Fake',
+      async stream() {
+        calls += 1;
+        return (async function* () {
+          yield { type: 'content', content: 'partial' } as StreamChunk;
+          throw new Error('connection reset');
+        })();
+      },
+    };
+    const events: AgentEvent[] = [];
+
+    await runTurn({ session, provider, tools: [], config: { permissions: autoPerms, retryBackoffMs: [0, 0, 0] }, onEvent: (e) => events.push(e), userMessage: 'go' });
+
+    expect(calls).toBe(1);
+    expect(events.filter((e) => e.type === 'content')).toEqual([{ type: 'content', text: 'partial' }]);
+    expect(session.messages.some((m) => m.role === 'assistant')).toBe(false);
+    expect(events.some((e) => e.type === 'error' && e.message.includes('connection reset'))).toBe(true);
+  });
+
+  it('does not retry a transient failure after a tool delta and does not run the tool', async () => {
+    const root = await tmpWorkspace();
+    const session = await createSession(root, 'fake', 'fake-model');
+    let calls = 0;
+    let ran = false;
+    const noopTool: ToolDefinitionFull<Record<string, never>> = {
+      name: 'noop', description: 'no-op', parameters: z.object({}), risk: 'read',
+      async run() { ran = true; return { ok: true, output: 'fine' }; },
+    };
+    const provider: LlmProvider = {
+      id: 'fake',
+      name: 'Fake',
+      async stream() {
+        calls += 1;
+        return (async function* () {
+          yield { type: 'tool_call', toolCall: { id: 'x1', name: 'noop', arguments: '{' } } as StreamChunk;
+          throw new Error('connection reset');
+        })();
+      },
+    };
+    const events: AgentEvent[] = [];
+
+    await runTurn({ session, provider, tools: [noopTool], config: { permissions: autoPerms, retryBackoffMs: [0, 0, 0] }, onEvent: (e) => events.push(e), userMessage: 'go' });
+
+    expect(calls).toBe(1);
+    expect(ran).toBe(false);
+    expect(session.messages.some((m) => m.role === 'assistant')).toBe(false);
+    expect(session.messages.some((m) => m.role === 'tool')).toBe(false);
+    expect(events.some((e) => e.type === 'tool-call-delta' && e.toolCallId === 'x1')).toBe(true);
+    expect(events.some((e) => e.type === 'error' && e.message.includes('connection reset'))).toBe(true);
+  });
+
+  it('does not retry a non-transient status 400 error', async () => {
+    const root = await tmpWorkspace();
+    const session = await createSession(root, 'fake', 'fake-model');
+    let calls = 0;
+    const provider: LlmProvider = {
+      id: 'fake',
+      name: 'Fake',
+      async stream() {
+        calls += 1;
+        throw Object.assign(new Error('network error bad request'), { status: 400 });
+      },
+    };
+    const events: AgentEvent[] = [];
+
+    await runTurn({ session, provider, tools: [], config: { permissions: autoPerms, retryBackoffMs: [0, 0, 0] }, onEvent: (e) => events.push(e), userMessage: 'go' });
+
+    expect(calls).toBe(1);
+    expect(events.some((e) => e.type === 'error' && e.message.includes('network error bad request'))).toBe(true);
+    expect(session.messages.some((m) => m.role === 'assistant')).toBe(false);
+  });
+});
+
 describe('runTurn auto-compaction', () => {
   it('compacts older history before the turn when enabled and over threshold', async () => {
     const root = await tmpWorkspace();

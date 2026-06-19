@@ -6,3 +6,4 @@ dist
 coverage
 tokscale-export-*.json
 .claude
+.omp/

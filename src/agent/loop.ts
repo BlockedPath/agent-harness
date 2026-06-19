@@ -1,25 +1,26 @@
 import { createTwoFilesPatch } from 'diff';
 import fs from 'node:fs/promises';
 import type { ChatMessage, LlmProvider } from '../llm/types.js';
-import { aggregateStream } from '../llm/stream.js';
+import { aggregateStream, type AggregatedStream } from '../llm/stream.js';
 import { buildSystemPrompt } from './prompts.js';
 import type { AgentEvent } from './types.js';
 import type { PermissionConfig } from '../policy/types.js';
 import { requiresApproval } from '../policy/approval.js';
 import { classifyCommand } from '../policy/classifier.js';
-import { appendMessage } from '../session/store.js';
+import { appendMessage, appendUsage } from '../session/store.js';
 import { compactSession, COMPACTION_SUMMARY_PREFIX, type CompactionConfig } from './compaction.js';
 import type { Session } from '../session/types.js';
 import { resolveWorkspacePath } from '../sandbox/workspace-boundary.js';
 import { toProviderTools } from '../tools/registry.js';
 import type { RiskLevel, ToolDefinitionFull, ToolResult } from '../tools/types.js';
 import { loadWorkspaceContext } from '../workspace/context.js';
+import { DEFAULT_RETRY_BACKOFF_MS, isTransientProviderError } from '../llm/retry.js';
 
 export interface RunTurnOptions {
   session: Session;
   provider: LlmProvider;
   tools: ToolDefinitionFull[];
-  config: { permissions: PermissionConfig; maxIterations?: number; compaction?: CompactionConfig };
+  config: { permissions: PermissionConfig; maxIterations?: number; compaction?: CompactionConfig; retryBackoffMs?: number[] };
   onEvent: (event: AgentEvent) => void;
   userMessage?: string;
 }
@@ -48,13 +49,10 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
 
   for (let iteration = 0; iteration < maxIterations; iteration++) {
     try {
-      const stream = await options.provider.stream({ model: options.session.model, messages: [system, ...trimMessages(options.session.messages)], tools: toProviderTools(options.tools) });
-      const aggregated = await aggregateStream(
-        stream,
-        (text) => options.onEvent({ type: 'content', text }),
-        (delta) => options.onEvent({ type: 'tool-call-delta', toolCallId: delta.id, name: delta.name, partialArgs: delta.partialArgs }),
-      );
+      const request = { model: options.session.model, messages: [system, ...trimMessages(options.session.messages)], tools: toProviderTools(options.tools) };
+      const aggregated = await streamTurn(options, request, options.config.retryBackoffMs ?? DEFAULT_RETRY_BACKOFF_MS);
       if (aggregated.usage) options.onEvent({ type: 'usage', usage: aggregated.usage });
+      if (aggregated.usage) await appendUsage(options.session.workspaceRoot, options.session.id, aggregated.usage);
       const assistantMessage: ChatMessage = { role: 'assistant', content: aggregated.content, toolCalls: aggregated.toolCalls.length ? aggregated.toolCalls : undefined };
       options.session.messages.push(assistantMessage);
       await appendMessage(options.session.workspaceRoot, options.session.id, assistantMessage);
@@ -148,6 +146,22 @@ async function ensureToolResultsPaired(options: RunTurnOptions): Promise<void> {
   }
 }
 async function pushToolResult(options: RunTurnOptions, toolCallId: string, result: ToolResult): Promise<void> { const message: ChatMessage = { role: 'tool', toolCallId, content: result.ok ? result.output : `${result.error ?? 'error'}\n${result.output}` }; options.session.messages.push(message); await appendMessage(options.session.workspaceRoot, options.session.id, message); }
+async function streamTurn(options: RunTurnOptions, request: Parameters<LlmProvider['stream']>[0], backoff: readonly number[]): Promise<AggregatedStream> {
+  let streamed = false;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const stream = await options.provider.stream(request);
+      return await aggregateStream(
+        stream,
+        (text) => { streamed = true; options.onEvent({ type: 'content', text }); },
+        (delta) => { streamed = true; options.onEvent({ type: 'tool-call-delta', toolCallId: delta.id, name: delta.name, partialArgs: delta.partialArgs }); },
+      );
+    } catch (err) {
+      if (streamed || !isTransientProviderError(err) || attempt >= backoff.length) throw err;
+      await new Promise((resolve) => setTimeout(resolve, backoff[attempt]));
+    }
+  }
+}
 function riskForApproval(tool: ToolDefinitionFull, input: unknown): RiskLevel { return tool.name === 'run_command' ? classifyCommand((input as { command?: string }).command ?? '') : tool.risk; }
 function replaceLiteralOnce(content: string, oldString: string, newString: string): string { return content.replace(oldString, () => newString); }
 

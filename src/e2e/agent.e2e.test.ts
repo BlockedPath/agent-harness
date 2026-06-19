@@ -13,6 +13,7 @@ const baseConfig: Config = {
   defaultModel: 'fake-model',
   permissions: { mode: 'auto', read: 'allow', write: 'allow', execute: 'allow', network: 'ask' },
   compaction: { auto: false, messageThreshold: 60, keepRecent: 20 },
+  tools: { deny: [] },
   providers: { fake: { auth: 'api-key' } },
 };
 

@@ -3,7 +3,7 @@ import { runTurn } from './agent/loop.js';
 import { createProvider } from './llm/registry.js';
 import type { LlmProvider } from './llm/types.js';
 import { createSession, loadSession } from './session/store.js';
-import { ALL_TOOLS } from './tools/registry.js';
+import { ALL_TOOLS, filterTools } from './tools/registry.js';
 
 export interface RunHeadlessOptions {
   workspaceRoot: string;
@@ -20,6 +20,8 @@ export interface RunHeadlessOptions {
   writeErr?: (text: string) => void;
   /** Provider override; defaults to building one from config. Used for testing. */
   provider?: LlmProvider;
+  /** Emit one machine-readable JSON result line instead of streaming text/status. */
+  json?: boolean;
 }
 
 /**
@@ -30,6 +32,72 @@ export interface RunHeadlessOptions {
 export async function runHeadless(options: RunHeadlessOptions): Promise<void> {
   const write = options.write ?? ((text: string) => void process.stdout.write(text));
   const writeErr = options.writeErr ?? ((text: string) => void process.stderr.write(text));
+
+  if (options.json) {
+    let session: Awaited<ReturnType<typeof createSession>> | null = null;
+    let content = '';
+    const toolCalls = new Map<string, { name: string; input: unknown; ok: boolean | null; output: string; error: string | null }>();
+    let usage: { promptTokens: number; completionTokens: number; totalTokens: number } | null = null;
+    let errorMessage: string | null = null;
+
+    try {
+      session = options.sessionId
+        ? await loadSession(options.workspaceRoot, options.sessionId)
+        : await createSession(options.workspaceRoot, options.providerId, options.model);
+      const provider = options.provider ?? await createProvider({ ...options.config, defaultProvider: options.providerId });
+
+      await runTurn({
+        session,
+        provider,
+        tools: filterTools(ALL_TOOLS, options.config.tools),
+        config: { permissions: options.config.permissions, compaction: options.config.compaction },
+        userMessage: options.prompt,
+        onEvent(event) {
+          switch (event.type) {
+            case 'content':
+              content += event.text;
+              break;
+            case 'tool-start':
+              toolCalls.set(event.toolCallId, { name: event.name, input: event.input, ok: null, output: '', error: null });
+              break;
+            case 'tool-done': {
+              const toolCall = toolCalls.get(event.toolCallId);
+              if (toolCall) {
+                toolCall.ok = event.result.ok;
+                toolCall.output = event.result.output;
+                toolCall.error = event.result.error ?? null;
+              }
+              break;
+            }
+            case 'approval-request':
+              event.resolve(!!options.autoApprove);
+              break;
+            case 'question':
+              event.resolve('No answer available; running non-interactively.');
+              break;
+            case 'usage':
+              usage = usage
+                ? {
+                    promptTokens: usage.promptTokens + event.usage.promptTokens,
+                    completionTokens: usage.completionTokens + event.usage.completionTokens,
+                    totalTokens: usage.totalTokens + event.usage.totalTokens,
+                  }
+                : { ...event.usage };
+              break;
+            case 'error':
+              errorMessage = event.message;
+              break;
+          }
+        },
+      });
+    } catch (err) {
+      errorMessage = err instanceof Error ? err.message : String(err);
+    }
+
+    write(JSON.stringify({ ok: !errorMessage, sessionId: session?.id ?? options.sessionId ?? '', content, toolCalls: [...toolCalls.values()], usage, error: errorMessage }) + '\n');
+    if (errorMessage) throw new Error(errorMessage);
+    return;
+  }
 
   const session = options.sessionId
     ? await loadSession(options.workspaceRoot, options.sessionId)
@@ -43,7 +111,7 @@ export async function runHeadless(options: RunHeadlessOptions): Promise<void> {
   await runTurn({
     session,
     provider,
-    tools: ALL_TOOLS,
+    tools: filterTools(ALL_TOOLS, options.config.tools),
     config: { permissions: options.config.permissions, compaction: options.config.compaction },
     userMessage: options.prompt,
     onEvent(event) {

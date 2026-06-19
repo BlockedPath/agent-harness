@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Box, Text, useApp } from 'ink';
+import { Box, useApp } from 'ink';
 import type { Config } from '../config/schema.js';
 import { createProvider, getProviderCredentialStatus, type ProviderCredentialStatus } from '../llm/registry.js';
 import { CODEX_MODELS } from '../llm/models.js';
@@ -10,7 +10,7 @@ import { compactSession, DEFAULT_COMPACTION } from '../agent/compaction.js';
 import { createSession, listSessionSummaries, loadSession, setSessionModel, type SessionSummary } from '../session/store.js';
 import { parseCommand } from './commands.js';
 import type { Session } from '../session/types.js';
-import { ALL_TOOLS } from '../tools/registry.js';
+import { ALL_TOOLS, filterTools } from '../tools/registry.js';
 import { ApprovalModal } from './components/approval-modal.js';
 import { CredentialNoticePanel } from './components/credential-notice.js';
 import { InputBar } from './components/input-bar.js';
@@ -19,6 +19,7 @@ import { ModelPicker } from './components/model-picker.js';
 import { SessionPicker } from './components/session-picker.js';
 import { Messages } from './components/messages.js';
 import { ToolCard } from './components/tool-card.js';
+import { StatusFooter } from './components/status-footer.js';
 import { TuiStoreProvider, useTuiStore, type CredentialNotice } from './store.js';
 
 export interface AppProps {
@@ -87,7 +88,7 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
       await runTurn({
         session,
         provider,
-        tools: ALL_TOOLS,
+        tools: filterTools(ALL_TOOLS, config.tools),
         config: { permissions: config.permissions, compaction: config.compaction },
         userMessage: message,
         onEvent(event) {
@@ -184,6 +185,7 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
       dispatch({ type: 'reset' });
       setSession(loaded);
       setActiveModel(loaded.model);
+      if (loaded.usage) dispatch({ type: 'usage', usage: loaded.usage });
       for (const message of loaded.messages) dispatch({ type: 'add-message', message });
       dispatch({ type: 'add-message', message: { role: 'assistant', content: `Resumed session ${loaded.id} (${loaded.messages.length} messages).` } });
     })().catch((error: unknown) => {
@@ -282,10 +284,12 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
         <ApprovalModal />
       </Box>
       <InputBar onSubmit={submit} />
-      <Box justifyContent="space-between" paddingX={1}>
-        <Text dimColor>{state.inputDisabled ? 'working…' : state.credentialNotice ? 'auth required' : 'ready'}</Text>
-        <Text dimColor>{providerId}/{activeModel}{state.usage ? ` · ${formatTokens(state.usage.totalTokens)} tok` : ''}</Text>
-      </Box>
+      <StatusFooter
+        status={state.inputDisabled ? 'working…' : state.credentialNotice ? 'auth required' : 'ready'}
+        providerId={providerId}
+        model={activeModel}
+        usage={state.usage}
+      />
     </Box>
   );
 }
@@ -321,9 +325,6 @@ function buildAuthRetryNotice(providerId: string): CredentialNotice {
   };
 }
 
-function formatTokens(total: number): string {
-  return total >= 1000 ? `${(total / 1000).toFixed(1)}k` : String(total);
-}
 
 export function isAuthError(error: unknown): boolean {
   if (error instanceof CodexAuthError) return true;
