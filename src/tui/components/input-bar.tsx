@@ -36,6 +36,7 @@ export function InputBar({ onSubmit }: { onSubmit: (value: string) => void }) {
       return;
     }
     if (state.inputDisabled) return;
+    if (state.screen !== 'chat') return;
     if (commandPreview.length > 0 && key.upArrow) {
       setSelectedCommandIndex((current) => (current - 1 + commandPreview.length) % commandPreview.length);
       return;

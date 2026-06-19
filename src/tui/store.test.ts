@@ -90,3 +90,23 @@ describe('tui reducer — errors', () => {
     expect(reducer(withError, { type: 'reset' }).messages).toEqual([]);
   });
 });
+
+describe('tui reducer — credential notice', () => {
+  it('stores and clears a startup credential notice', () => {
+    const notice = { providerId: 'anthropic', action: 'set-env' as const, envVar: 'ANTHROPIC_API_KEY', message: 'Set ANTHROPIC_API_KEY.' };
+    const withNotice = reducer(initialState, { type: 'set-credential-notice', notice });
+
+    expect(withNotice.credentialNotice).toEqual(notice);
+    expect(reducer(withNotice, { type: 'set-credential-notice', notice: null }).credentialNotice).toBeNull();
+  });
+
+  it('preserves a credential notice across chat reset', () => {
+    const withNotice = reducer(initialState, { type: 'set-credential-notice', notice: { providerId: 'codex', action: 'login', message: 'Sign in.' } });
+    const onCredentials = reducer(withNotice, { type: 'set-screen', screen: 'credentials' });
+    const reset = reducer(reducer(onCredentials, { type: 'add-message', message: { role: 'assistant', content: 'hello' } }), { type: 'reset' });
+
+    expect(reset.messages).toEqual([]);
+    expect(reset.credentialNotice).toEqual(withNotice.credentialNotice);
+    expect(reset.screen).toBe('credentials');
+  });
+});

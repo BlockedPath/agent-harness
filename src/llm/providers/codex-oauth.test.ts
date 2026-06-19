@@ -5,6 +5,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CodexAuthError, CodexOAuthProvider, loadCodexCredentials } from './codex-oauth.js';
 
 describe('loadCodexCredentials', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('syncs newer source credentials over stale workspace credentials', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'harness-codex-auth-'));
     const workspacePath = path.join(dir, 'workspace.json');
@@ -17,6 +21,23 @@ describe('loadCodexCredentials', () => {
     expect(credentials?.accessToken).toBe('new-token');
     const synced = JSON.parse(await fs.readFile(workspacePath, 'utf8')) as { tokens: { access_token: string } };
     expect(synced.tokens.access_token).toBe('new-token');
+  });
+
+  it('prefers tokenEnv credentials before reading files', async () => {
+    vi.stubEnv('HARNESS_TEST_CODEX_TOKEN', 'env-token');
+
+    const credentials = await loadCodexCredentials({ tokenEnv: 'HARNESS_TEST_CODEX_TOKEN', credentialsPath: '/path/that/does/not/exist.json', sourceCredentialsPath: '/also/missing.json' });
+
+    expect(credentials).toEqual({ accessToken: 'env-token' });
+  });
+
+  it('returns null when env and credential files have no access token', async () => {
+    vi.stubEnv('HARNESS_TEST_CODEX_TOKEN', '');
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'harness-codex-auth-'));
+    const emptyPath = path.join(dir, 'empty.json');
+    await fs.writeFile(emptyPath, JSON.stringify({ tokens: {} }));
+
+    await expect(loadCodexCredentials({ tokenEnv: 'HARNESS_TEST_CODEX_TOKEN', credentialsPath: emptyPath, sourceCredentialsPath: path.join(dir, 'missing.json') })).resolves.toBeNull();
   });
 });
 
