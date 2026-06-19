@@ -8,7 +8,7 @@ const schema = z.object({ path: z.string(), offset: z.number().int().positive().
 
 export const readFileTool: ToolDefinitionFull<z.infer<typeof schema>> = {
   name: 'read_file',
-  description: 'Read a range of lines from a file inside the workspace.',
+  description: 'Read a range of lines from a file inside the workspace. Output is line-numbered; pass offset (1-based first line) and limit to page through large files.',
   parameters: schema,
   risk: 'read',
   async run(input, ctx) {
@@ -17,8 +17,20 @@ export const readFileTool: ToolDefinitionFull<z.infer<typeof schema>> = {
     const lines = content.split(/\r?\n/);
     const offset = input.offset ?? 1;
     const limit = input.limit ?? 100;
-    const selected = lines.slice(offset - 1, offset - 1 + limit).join('\n');
-    const suffix = lines.length > offset - 1 + limit ? '\n[truncated: use read_file with offset]' : '';
-    return { ok: true, output: `${path.relative(ctx.workspaceRoot, abs)}\n${selected}${suffix}` };
+    const total = lines.length;
+    const start = offset;
+    const slice = lines.slice(offset - 1, offset - 1 + limit);
+    const end = offset - 1 + slice.length;
+    const rel = path.relative(ctx.workspaceRoot, abs);
+
+    if (slice.length === 0) {
+      return { ok: true, output: `${rel} (no lines: offset ${offset} is past end of file, ${total} lines total)` };
+    }
+
+    const width = String(total).length;
+    const numbered = slice.map((line, i) => `${String(offset + i).padStart(width)}| ${line}`).join('\n');
+    const header = `${rel} (lines ${start}-${end} of ${total})`;
+    const suffix = end < total ? `\n[truncated: ${total - end} more lines — call read_file with offset ${end + 1}]` : '';
+    return { ok: true, output: `${header}\n${numbered}${suffix}` };
   },
 };

@@ -6,6 +6,7 @@ export interface ToolCardState {
   name: string;
   input: unknown;
   status: 'pending' | 'running' | 'done' | 'error';
+  startedAt?: number;
   output?: string;
   diff?: string;
 }
@@ -92,6 +93,7 @@ export function reducer(state: TuiState, action: Action): TuiState {
       // running/done/error (the agent loop may emit a trailing delta).
       const existing = state.toolCards.find((c) => c.id === action.id);
       if (existing) {
+        if (existing.status !== 'pending') return state;
         return { ...state, toolCards: state.toolCards.map((c) => c.id === action.id ? { ...c, name: action.name, input: action.partialArgs } : c) };
       }
       return { ...state, toolCards: [...state.toolCards, { id: action.id, name: action.name, input: action.partialArgs, status: 'pending' }] };
@@ -100,11 +102,12 @@ export function reducer(state: TuiState, action: Action): TuiState {
       // Upsert: a pending card from `tool-call-delta` may already exist for this
       // id. Promote it to running with the parsed input instead of appending a
       // duplicate card.
+      const startedAt = Date.now();
       const existing = state.toolCards.find((c) => c.id === action.id);
       if (existing) {
-        return { ...state, toolCards: state.toolCards.map((c) => c.id === action.id ? { ...c, name: action.name, input: action.input, status: 'running' } : c) };
+        return { ...state, toolCards: state.toolCards.map((c) => c.id === action.id ? { ...c, name: action.name, input: action.input, status: 'running', startedAt: c.startedAt ?? startedAt } : c) };
       }
-      return { ...state, toolCards: [...state.toolCards, { id: action.id, name: action.name, input: action.input, status: 'running' }] };
+      return { ...state, toolCards: [...state.toolCards, { id: action.id, name: action.name, input: action.input, status: 'running', startedAt }] };
     }
     case 'tool-done':
       return { ...state, toolCards: state.toolCards.map((card) => card.id === action.id ? { ...card, status: action.ok ? 'done' : 'error', output: action.output } : card) };

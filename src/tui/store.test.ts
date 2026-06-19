@@ -17,8 +17,10 @@ describe('tui reducer — tool-call-delta', () => {
   it('does not downgrade status: a delta after tool-start keeps the card running', () => {
     const afterStart = reducer(initialState, { type: 'tool-start', id: 'call_1', name: 'bash', input: { command: 'ls' } });
     const afterDelta = reducer(afterStart, { type: 'tool-call-delta', id: 'call_1', name: 'bash', partialArgs: '{"command":"ls"}' });
-    expect(afterDelta.toolCards).toEqual([{ id: 'call_1', name: 'bash', input: '{"command":"ls"}', status: 'running' }]);
+    const card = afterDelta.toolCards[0];
     expect(afterDelta.toolCards).toHaveLength(1);
+    expect(card).toMatchObject({ id: 'call_1', name: 'bash', input: { command: 'ls' }, status: 'running' });
+    expect(card?.startedAt).toEqual(expect.any(Number));
   });
 });
 
@@ -26,8 +28,10 @@ describe('tui reducer — tool-start upsert', () => {
   it('upserts the same card to running after a tool-call-delta (no duplicate)', () => {
     const afterDelta = reducer(initialState, { type: 'tool-call-delta', id: 'call_1', name: 'bash', partialArgs: '{"command":"ls"}' });
     const afterStart = reducer(afterDelta, { type: 'tool-start', id: 'call_1', name: 'bash', input: { command: 'ls' } });
-    expect(afterStart.toolCards).toEqual([{ id: 'call_1', name: 'bash', input: { command: 'ls' }, status: 'running' }]);
+    const card = afterStart.toolCards[0];
     expect(afterStart.toolCards).toHaveLength(1);
+    expect(card).toMatchObject({ id: 'call_1', name: 'bash', input: { command: 'ls' }, status: 'running' });
+    expect(card?.startedAt).toEqual(expect.any(Number));
   });
 });
 
