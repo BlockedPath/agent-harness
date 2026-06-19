@@ -27,3 +27,22 @@ export function scriptedProvider(turns: StreamChunk[][]): LlmProvider {
     },
   };
 }
+
+/**
+ * A provider whose stream yields the given chunks and then throws, simulating a
+ * network drop after partial content / partial tool-call deltas. The throw is
+ * inside the async generator, so it surfaces while `aggregateStream` is
+ * consuming the iterator (the realistic mid-stream failure point).
+ */
+export function failingStreamProvider(chunks: StreamChunk[], errorMessage: string): LlmProvider {
+  return {
+    id: 'fake',
+    name: 'Fake',
+    async stream() {
+      return (async function* () {
+        for (const chunk of chunks) yield chunk;
+        throw new Error(errorMessage);
+      })();
+    },
+  };
+}

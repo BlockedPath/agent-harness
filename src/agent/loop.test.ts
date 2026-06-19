@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { trimMessages, parseArgs, previewDiff, runTurn } from './loop.js';
 import { COMPACTION_SUMMARY_PREFIX } from './compaction.js';
 import { createSession } from '../session/store.js';
-import { scriptedProvider } from '../test/fake-provider.js';
+import { failingStreamProvider, scriptedProvider } from '../test/fake-provider.js';
 import type { ChatMessage, LlmProvider, StreamChunk } from '../llm/types.js';
 import type { AgentEvent } from './types.js';
 import type { PermissionConfig } from '../policy/types.js';
@@ -207,6 +207,47 @@ describe('runTurn live tool-call deltas', () => {
     expect(startIndex).toBeGreaterThan(deltaIndex);
     const start = events[startIndex];
     expect(start?.type === 'tool-start' && start.toolCallId).toBe('d1');
+  });
+});
+
+describe('runTurn stream failure mid-turn', () => {
+  it('does not execute a tool or commit an assistant message when the stream throws mid-tool-call', async () => {
+    const root = await tmpWorkspace();
+    const session = await createSession(root, 'fake', 'fake-model');
+    let ran = false;
+    const noopTool: ToolDefinitionFull<Record<string, never>> = {
+      name: 'noop', description: 'no-op', parameters: z.object({}), risk: 'read',
+      async run() { ran = true; return { ok: true, output: 'fine' }; },
+    };
+    const provider = failingStreamProvider(
+      [{ type: 'tool_call', toolCall: { id: 'x1', name: 'noop', arguments: '{' } }],
+      'connection reset',
+    );
+    const events: AgentEvent[] = [];
+    await runTurn({ session, provider, tools: [noopTool], config: { permissions: autoPerms }, onEvent: (e) => events.push(e), userMessage: 'go' });
+
+    expect(ran).toBe(false);
+    expect(session.messages.some((m) => m.role === 'assistant')).toBe(false);
+    expect(session.messages.some((m) => m.role === 'tool')).toBe(false);
+    expect(session.messages.at(-1)).toMatchObject({ role: 'user', content: 'go' });
+    // A live delta was emitted before the failure → the card the TUI must clear (Step 1).
+    expect(events.some((e) => e.type === 'tool-call-delta' && e.toolCallId === 'x1')).toBe(true);
+    expect(events.some((e) => e.type === 'error' && e.message.includes('connection reset'))).toBe(true);
+    expect(events.some((e) => e.type === 'done')).toBe(true);
+  });
+
+  it('does not commit an assistant message when the stream throws after partial content', async () => {
+    const root = await tmpWorkspace();
+    const session = await createSession(root, 'fake', 'fake-model');
+    const provider = failingStreamProvider([{ type: 'content', content: 'partial answer' }], 'stream aborted');
+    const events: AgentEvent[] = [];
+    await runTurn({ session, provider, tools: [], config: { permissions: autoPerms }, onEvent: (e) => events.push(e), userMessage: 'go' });
+
+    expect(session.messages.some((m) => m.role === 'assistant')).toBe(false);
+    expect(session.messages.at(-1)).toMatchObject({ role: 'user', content: 'go' });
+    expect(events.some((e) => e.type === 'content' && e.text === 'partial answer')).toBe(true);
+    expect(events.some((e) => e.type === 'error' && e.message.includes('stream aborted'))).toBe(true);
+    expect(events.some((e) => e.type === 'done')).toBe(true);
   });
 });
 

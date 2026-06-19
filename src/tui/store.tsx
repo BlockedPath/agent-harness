@@ -91,8 +91,20 @@ export function reducer(state: TuiState, action: Action): TuiState {
   switch (action.type) {
     case 'add-message':
       return { ...state, messages: [...state.messages, action.message].slice(-200) };
-    case 'add-error':
-      return { ...state, messages: [...state.messages, { role: 'error' as const, severity: action.severity, content: action.content }].slice(-200) };
+    case 'add-error': {
+      // A turn-fatal error (the only source of this action from the agent loop)
+      // must terminate any tool card still pending (args streamed via
+      // tool-call-delta but never executed because the stream failed) or running
+      // (host aborted mid-run). Surface the failure on the card; never downgrade
+      // or overwrite a completed/errored card.
+      const messages = [...state.messages, { role: 'error' as const, severity: action.severity, content: action.content }].slice(-200);
+      const toolCards = state.toolCards.map((card) =>
+        card.status === 'pending' || card.status === 'running'
+          ? { ...card, status: 'error' as const, output: card.output ?? action.content }
+          : card,
+      );
+      return { ...state, messages, toolCards };
+    }
     case 'content':
       return { ...state, streamingText: state.streamingText + action.text };
     case 'tool-call-delta': {

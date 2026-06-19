@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aggregateStream } from './stream.js';
+import { aggregateStream, type ToolCallDelta } from './stream.js';
 import type { StreamChunk } from './types.js';
 
 describe('aggregateStream', () => {
@@ -30,5 +30,16 @@ describe('aggregateStream', () => {
       { id: '1', name: 'read_', partialArgs: '{"path"' },
       { id: '1', name: 'read_file', partialArgs: '{"path":"a.ts"}' },
     ]);
+  });
+
+  it('propagates an error when the underlying stream throws mid-iteration', async () => {
+    async function* chunks(): AsyncIterable<StreamChunk> {
+      yield { type: 'tool_call', toolCall: { id: '1', name: 'read_', arguments: '{"path"' } };
+      throw new Error('boom');
+    }
+    const deltas: ToolCallDelta[] = [];
+    await expect(aggregateStream(chunks(), undefined, (d) => deltas.push({ ...d }))).rejects.toThrow('boom');
+    // The live delta for the partial call still fired before the failure.
+    expect(deltas).toEqual([{ id: '1', name: 'read_', partialArgs: '{"path"' }]);
   });
 });
