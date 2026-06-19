@@ -184,6 +184,7 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
       dispatch({ type: 'reset' });
       setSession(loaded);
       setActiveModel(loaded.model);
+      if (loaded.usage) dispatch({ type: 'usage', usage: loaded.usage });
       for (const message of loaded.messages) dispatch({ type: 'add-message', message });
       dispatch({ type: 'add-message', message: { role: 'assistant', content: `Resumed session ${loaded.id} (${loaded.messages.length} messages).` } });
     })().catch((error: unknown) => {

@@ -7,7 +7,7 @@ import type { AgentEvent } from './types.js';
 import type { PermissionConfig } from '../policy/types.js';
 import { requiresApproval } from '../policy/approval.js';
 import { classifyCommand } from '../policy/classifier.js';
-import { appendMessage } from '../session/store.js';
+import { appendMessage, appendUsage } from '../session/store.js';
 import { compactSession, COMPACTION_SUMMARY_PREFIX, type CompactionConfig } from './compaction.js';
 import type { Session } from '../session/types.js';
 import { resolveWorkspacePath } from '../sandbox/workspace-boundary.js';
@@ -52,6 +52,7 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
       const request = { model: options.session.model, messages: [system, ...trimMessages(options.session.messages)], tools: toProviderTools(options.tools) };
       const aggregated = await streamTurn(options, request, options.config.retryBackoffMs ?? DEFAULT_RETRY_BACKOFF_MS);
       if (aggregated.usage) options.onEvent({ type: 'usage', usage: aggregated.usage });
+      if (aggregated.usage) await appendUsage(options.session.workspaceRoot, options.session.id, aggregated.usage);
       const assistantMessage: ChatMessage = { role: 'assistant', content: aggregated.content, toolCalls: aggregated.toolCalls.length ? aggregated.toolCalls : undefined };
       options.session.messages.push(assistantMessage);
       await appendMessage(options.session.workspaceRoot, options.session.id, assistantMessage);
