@@ -10,7 +10,7 @@ import { compactSession, DEFAULT_COMPACTION } from '../agent/compaction.js';
 import { createSession, listSessionSummaries, loadSession, setSessionModel, type SessionSummary } from '../session/store.js';
 import { parseCommand } from './commands.js';
 import type { Session } from '../session/types.js';
-import { ALL_TOOLS } from '../tools/registry.js';
+import { ALL_TOOLS, filterTools } from '../tools/registry.js';
 import { ApprovalModal } from './components/approval-modal.js';
 import { CredentialNoticePanel } from './components/credential-notice.js';
 import { InputBar } from './components/input-bar.js';
@@ -87,7 +87,7 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
       await runTurn({
         session,
         provider,
-        tools: ALL_TOOLS,
+        tools: filterTools(ALL_TOOLS, config.tools),
         config: { permissions: config.permissions, compaction: config.compaction },
         userMessage: message,
         onEvent(event) {

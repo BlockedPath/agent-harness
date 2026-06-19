@@ -3,7 +3,7 @@ import { runTurn } from './agent/loop.js';
 import { createProvider } from './llm/registry.js';
 import type { LlmProvider } from './llm/types.js';
 import { createSession, loadSession } from './session/store.js';
-import { ALL_TOOLS } from './tools/registry.js';
+import { ALL_TOOLS, filterTools } from './tools/registry.js';
 
 export interface RunHeadlessOptions {
   workspaceRoot: string;
@@ -43,7 +43,7 @@ export async function runHeadless(options: RunHeadlessOptions): Promise<void> {
   await runTurn({
     session,
     provider,
-    tools: ALL_TOOLS,
+    tools: filterTools(ALL_TOOLS, options.config.tools),
     config: { permissions: options.config.permissions, compaction: options.config.compaction },
     userMessage: options.prompt,
     onEvent(event) {

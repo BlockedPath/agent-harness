@@ -27,6 +27,7 @@ export const configSchema = z.object({
   defaultModel: z.string(),
   permissions: permissionSchema.default({ mode: 'on-request', read: 'allow', write: 'ask', execute: 'ask', network: 'ask' }),
   compaction: compactionSchema.default({ auto: false, messageThreshold: 60, keepRecent: 20 }),
+  tools: z.object({ allow: z.array(z.string()).optional(), deny: z.array(z.string()).default([]) }).default({ deny: [] }),
   providers: z.record(z.string(), providerConfigSchema),
 });
 export type Config = z.infer<typeof configSchema>;
