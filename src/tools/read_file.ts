@@ -15,6 +15,7 @@ export const readFileTool: ToolDefinitionFull<z.infer<typeof schema>> = {
     const abs = resolveWorkspacePath(ctx.workspaceRoot, input.path);
     const content = await fs.readFile(abs, 'utf8');
     const lines = content.split(/\r?\n/);
+    if (content.endsWith('\n')) lines.pop();
     const offset = input.offset ?? 1;
     const limit = input.limit ?? 100;
     const total = lines.length;

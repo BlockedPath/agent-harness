@@ -22,6 +22,17 @@ describe('tui reducer — tool-call-delta', () => {
     expect(card).toMatchObject({ id: 'call_1', name: 'bash', input: { command: 'ls' }, status: 'running' });
     expect(card?.startedAt).toEqual(expect.any(Number));
   });
+
+  it('ignores a trailing delta after completion', () => {
+    const afterStart = reducer(initialState, { type: 'tool-start', id: 'call_1', name: 'bash', input: { command: 'ls' } });
+    const afterDone = reducer(afterStart, { type: 'tool-done', id: 'call_1', output: 'ok', ok: true });
+    const afterDelta = reducer(afterDone, { type: 'tool-call-delta', id: 'call_1', name: 'bash', partialArgs: '{"command":"pwd"}' });
+    const card = afterDelta.toolCards[0];
+
+    expect(afterDelta.toolCards).toHaveLength(1);
+    expect(card).toMatchObject({ id: 'call_1', name: 'bash', input: { command: 'ls' }, status: 'done', output: 'ok' });
+    expect(card?.startedAt).toBe(afterStart.toolCards[0]?.startedAt);
+  });
 });
 
 describe('tui reducer — tool-start upsert', () => {
@@ -32,6 +43,24 @@ describe('tui reducer — tool-start upsert', () => {
     expect(afterStart.toolCards).toHaveLength(1);
     expect(card).toMatchObject({ id: 'call_1', name: 'bash', input: { command: 'ls' }, status: 'running' });
     expect(card?.startedAt).toEqual(expect.any(Number));
+  });
+});
+
+describe('tui reducer — tool-done', () => {
+  it('marks successful cards done and preserves startedAt', () => {
+    const afterStart = reducer(initialState, { type: 'tool-start', id: 'call_1', name: 'bash', input: { command: 'ls' } });
+    const afterDone = reducer(afterStart, { type: 'tool-done', id: 'call_1', output: 'ok', ok: true });
+    const card = afterDone.toolCards[0];
+
+    expect(card).toMatchObject({ id: 'call_1', name: 'bash', status: 'done', output: 'ok' });
+    expect(card?.startedAt).toBe(afterStart.toolCards[0]?.startedAt);
+  });
+
+  it('marks failed cards error and preserves output', () => {
+    const afterStart = reducer(initialState, { type: 'tool-start', id: 'call_1', name: 'bash', input: { command: 'ls' } });
+    const afterDone = reducer(afterStart, { type: 'tool-done', id: 'call_1', output: 'boom', ok: false });
+
+    expect(afterDone.toolCards[0]).toMatchObject({ id: 'call_1', name: 'bash', status: 'error', output: 'boom' });
   });
 });
 
