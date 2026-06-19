@@ -13,6 +13,7 @@ const config: Config = {
   defaultModel: 'gpt-5.5',
   permissions: { mode: 'on-request', read: 'allow', write: 'ask', execute: 'ask', network: 'ask' },
   compaction: { auto: false, messageThreshold: 60, keepRecent: 20 },
+  tools: { deny: [] },
   providers: { codex: { auth: 'codex-oauth' } },
 };
 
@@ -188,6 +189,73 @@ describe('runHeadless', () => {
     expect(result.toolCalls[0]?.output).toContain('file content for json mode');
     expect(result.usage).toBeNull();
     expect(result.error).toBeNull();
+  });
+
+  it('applies configured tool filtering in JSON mode', async () => {
+    const out: string[] = [];
+    let offeredTools: string[] = [];
+    const provider: LlmProvider = {
+      id: 'fake',
+      name: 'Fake',
+      async stream(options) {
+        offeredTools = options.tools.map((tool) => tool.name);
+        return (async function* () {
+          yield { type: 'content', content: 'filtered' } satisfies StreamChunk;
+        })();
+      },
+    };
+
+    await runHeadless({
+      workspaceRoot: await workspace(),
+      config: { ...config, tools: { deny: ['run_command'] } },
+      providerId: 'codex',
+      model: 'gpt-5.5',
+      prompt: 'hi',
+      provider,
+      json: true,
+      write: (text) => out.push(text),
+      writeErr: () => {},
+    });
+
+    expect(offeredTools).toContain('read_file');
+    expect(offeredTools).not.toContain('run_command');
+    expect(JSON.parse(out[0] ?? '')).toMatchObject({ ok: true, content: 'filtered' });
+  });
+
+  it('writes JSON before throwing on provider setup errors', async () => {
+    const out: string[] = [];
+    const missingEnv = 'HARNESS_HEADLESS_JSON_MISSING_API_KEY';
+
+    await expect(runHeadless({
+      workspaceRoot: await workspace(),
+      config: {
+        ...config,
+        defaultProvider: 'missing',
+        providers: { missing: { auth: 'api-key', apiKeyEnv: missingEnv } },
+      },
+      providerId: 'missing',
+      model: 'fake-model',
+      prompt: 'hi',
+      json: true,
+      write: (text) => out.push(text),
+      writeErr: () => {},
+    })).rejects.toThrow(`Missing API key env var: ${missingEnv}`);
+
+    expect(out).toHaveLength(1);
+    const result = JSON.parse(out[0] ?? '') as {
+      ok: boolean;
+      sessionId: string;
+      content: string;
+      toolCalls: unknown[];
+      usage: unknown;
+      error: string | null;
+    };
+    expect(result.ok).toBe(false);
+    expect(result.sessionId).toBeTruthy();
+    expect(result.content).toBe('');
+    expect(result.toolCalls).toEqual([]);
+    expect(result.usage).toBeNull();
+    expect(result.error).toBe(`Missing API key env var: ${missingEnv}`);
   });
 
   it('writes JSON before throwing on errors', async () => {

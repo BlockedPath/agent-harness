@@ -5,9 +5,7 @@ import { TuiStoreProvider, useTuiStore } from '../store.js';
 import { Messages } from './messages.js';
 
 async function waitForRender(): Promise<void> {
-  const { promise, resolve } = Promise.withResolvers<void>();
-  setTimeout(resolve, 0);
-  await promise;
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
 }
 
 function SeededMessages() {

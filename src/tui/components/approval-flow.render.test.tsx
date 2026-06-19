@@ -7,9 +7,7 @@ import { InputBar } from './input-bar.js';
 
 async function waitForRender(): Promise<void> {
   for (let tick = 0; tick < 2; tick += 1) {
-    const { promise, resolve } = Promise.withResolvers<void>();
-    setTimeout(resolve, 0);
-    await promise;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }
 }
 
