@@ -260,7 +260,12 @@ describe('runTurn provider stream idle timeout', () => {
       id: 'fake', name: 'Fake',
       async stream() {
         calls++;
-        if (calls === 1) return (async function* () { await new Promise(() => {}); })();
+        if (calls === 1) {
+          return (async function* () {
+            await new Promise(() => {});
+            yield { type: 'content', content: 'unreachable' } as StreamChunk;
+          })();
+        }
         return (async function* () { yield { type: 'content', content: 'ok' } as StreamChunk; })();
       },
     };

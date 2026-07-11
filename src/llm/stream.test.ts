@@ -6,6 +6,7 @@ describe('aggregateStream', () => {
   it('fails when the provider emits no chunk before the idle timeout', async () => {
     async function* hung(): AsyncIterable<StreamChunk> {
       await new Promise(() => {});
+      yield { type: 'content', content: 'unreachable' };
     }
     await expect(aggregateStream(hung(), undefined, undefined, 5)).rejects.toThrow('provider stream timed out');
   });
