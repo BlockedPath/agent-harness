@@ -4,6 +4,12 @@ import path from 'node:path';
 import type { ChatMessage } from '../llm/types.js';
 import type { CompactionData, Session, SessionEvent } from './types.js';
 
+const SESSION_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
+
+function validateSessionId(sessionId: string): void {
+  if (!SESSION_ID_PATTERN.test(sessionId)) throw new Error(`Invalid session ID: ${sessionId}`);
+}
+
 export async function createSession(workspaceRoot: string, providerId: string, model: string): Promise<Session> {
   const id = `${new Date().toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(4).toString('hex')}`;
   const usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
@@ -13,6 +19,7 @@ export async function createSession(workspaceRoot: string, providerId: string, m
 }
 
 export async function appendEvent(workspaceRoot: string, sessionId: string, event: SessionEvent): Promise<void> {
+  validateSessionId(sessionId);
   const dir = sessionDir(workspaceRoot);
   await fs.mkdir(dir, { recursive: true });
   const file = path.join(dir, `${sessionId}.jsonl`);
@@ -36,6 +43,7 @@ export async function appendUsage(workspaceRoot: string, sessionId: string, usag
 }
 
 export async function loadSession(workspaceRoot: string, sessionId: string): Promise<Session> {
+  validateSessionId(sessionId);
   const raw = await fs.readFile(path.join(sessionDir(workspaceRoot), `${sessionId}.jsonl`), 'utf8');
   let session: Session | null = null;
   for (const line of raw.split(/\r?\n/)) {
@@ -79,7 +87,10 @@ export async function listSessions(workspaceRoot: string): Promise<string[]> {
   try {
     const dir = sessionDir(workspaceRoot);
     const entries = await fs.readdir(dir, { withFileTypes: true });
-    const stats = await Promise.all(entries.filter((entry) => entry.isFile() && entry.name.endsWith('.jsonl')).map(async (entry) => ({ name: entry.name.replace(/\.jsonl$/, ''), stat: await fs.stat(path.join(dir, entry.name)) })));
+    const stats = await Promise.all(entries.filter((entry) => {
+      if (!entry.isFile() || !entry.name.endsWith('.jsonl')) return false;
+      return SESSION_ID_PATTERN.test(entry.name.replace(/\.jsonl$/, ''));
+    }).map(async (entry) => ({ name: entry.name.replace(/\.jsonl$/, ''), stat: await fs.stat(path.join(dir, entry.name)) })));
     return stats.sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs).map((entry) => entry.name);
   } catch { return []; }
 }
