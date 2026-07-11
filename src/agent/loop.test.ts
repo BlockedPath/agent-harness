@@ -251,6 +251,29 @@ describe('runTurn stream failure mid-turn', () => {
   });
 });
 
+describe('runTurn user message persistence', () => {
+  it('can retry a previously persisted user message without appending it again', async () => {
+    const root = await tmpWorkspace();
+    const session = await createSession(root, 'fake', 'fake-model');
+    const provider: LlmProvider = {
+      id: 'fake',
+      name: 'Fake',
+      async stream() {
+        return (async function* () {
+          yield { type: 'content', content: 'retried' } as StreamChunk;
+        })();
+      },
+    };
+
+    await runTurn({ session, provider, tools: [], config: { permissions: autoPerms }, onEvent: () => {}, userMessage: 'go' });
+    await runTurn({ session, provider, tools: [], config: { permissions: autoPerms }, onEvent: () => {}, userMessage: 'go', persistUserMessage: false });
+
+    expect(session.messages.filter((message) => message.role === 'user' && message.content === 'go')).toHaveLength(1);
+    const raw = await fs.readFile(path.join(root, '.harness', 'sessions', `${session.id}.jsonl`), 'utf8');
+    expect(raw.split(/\r?\n/).filter((line) => line.includes('"role":"user"')).length).toBe(1);
+  });
+});
+
 describe('runTurn transient provider retry', () => {
   it('retries a transient failure before chunks and commits the successful retry once', async () => {
     const root = await tmpWorkspace();

@@ -35,7 +35,9 @@ export function InputBar({ onSubmit }: { onSubmit: (value: string) => void }) {
       setValue('');
       return;
     }
-    if (state.inputDisabled) return;
+    // A question is emitted while the agent turn is still running, so the
+    // normal turn-wide disabled state must not prevent entering its answer.
+    if (state.inputDisabled && !state.question) return;
     if (state.screen !== 'chat') return;
     if (commandPreview.length > 0 && key.upArrow) {
       setSelectedCommandIndex((current) => (current - 1 + commandPreview.length) % commandPreview.length);
