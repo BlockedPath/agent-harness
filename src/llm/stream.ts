@@ -1,5 +1,7 @@
 import type { StreamChunk, ToolCall } from './types.js';
 
+export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 30_000;
+
 export interface AggregatedStream {
   content: string;
   toolCalls: ToolCall[];
@@ -19,13 +21,28 @@ export async function aggregateStream(
   stream: AsyncIterable<StreamChunk>,
   onContent?: (text: string) => void,
   onToolCall?: (delta: ToolCallDelta) => void,
+  idleTimeoutMs = DEFAULT_STREAM_IDLE_TIMEOUT_MS,
 ): Promise<AggregatedStream> {
   let content = '';
   const toolCalls = new Map<string, ToolCall>();
   let anonymousIndex = 0;
   let usage: AggregatedStream['usage'];
 
-  for await (const chunk of stream) {
+  const iterator = stream[Symbol.asyncIterator]();
+  while (true) {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const next = iterator.next();
+    const timedOut = new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => reject(new Error('provider stream timed out')), idleTimeoutMs);
+    });
+    let result: IteratorResult<StreamChunk>;
+    try {
+      result = await Promise.race([next, timedOut]);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+    if (result.done) break;
+    const chunk = result.value;
     if (chunk.type === 'content') {
       const text = chunk.content ?? '';
       content += text;

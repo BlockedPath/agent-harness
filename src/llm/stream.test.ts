@@ -3,6 +3,22 @@ import { aggregateStream, type ToolCallDelta } from './stream.js';
 import type { StreamChunk } from './types.js';
 
 describe('aggregateStream', () => {
+  it('fails when the provider emits no chunk before the idle timeout', async () => {
+    async function* hung(): AsyncIterable<StreamChunk> {
+      await new Promise(() => {});
+    }
+    await expect(aggregateStream(hung(), undefined, undefined, 5)).rejects.toThrow('provider stream timed out');
+  });
+
+  it('resets the idle timeout after each chunk', async () => {
+    async function* delayed(): AsyncIterable<StreamChunk> {
+      yield { type: 'content', content: 'a' };
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      yield { type: 'content', content: 'b' };
+    }
+    await expect(aggregateStream(delayed(), undefined, undefined, 20)).resolves.toMatchObject({ content: 'ab' });
+  });
+
   it('combines text and tool call deltas', async () => {
     async function* chunks(): AsyncIterable<StreamChunk> {
       yield { type: 'content', content: 'hi ' };
