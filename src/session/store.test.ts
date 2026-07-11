@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { appendCompaction, appendMessage, createSession, listSessions, listSessionSummaries, loadSession, setSessionModel } from './store.js';
+import { appendCompaction, appendEvent, appendMessage, createSession, listSessions, listSessionSummaries, loadSession, setSessionModel } from './store.js';
 
 async function makeWorkspace(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'harness-session-'));
@@ -69,6 +69,13 @@ describe('session store resume', () => {
     await expect(loadSession(workspaceRoot, 'does-not-exist')).rejects.toThrow();
   });
 
+  it('rejects traversal and separator characters before filesystem access', async () => {
+    const workspaceRoot = await makeWorkspace();
+    await expect(loadSession(workspaceRoot, '../outside')).rejects.toThrow(/Invalid session ID/);
+    await expect(appendEvent(workspaceRoot, 'nested/session', { type: 'usage', data: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } })).rejects.toThrow(/Invalid session ID/);
+    await expect(loadSession(workspaceRoot, 'bad\\session')).rejects.toThrow(/Invalid session ID/);
+  });
+
   it('lists sessions most-recently-modified first', async () => {
     const workspaceRoot = await makeWorkspace();
     const first = await createSession(workspaceRoot, 'codex', 'gpt-5.5');
@@ -87,6 +94,16 @@ describe('session store resume', () => {
   it('returns an empty list when no sessions exist', async () => {
     const workspaceRoot = await makeWorkspace();
     expect(await listSessions(workspaceRoot)).toEqual([]);
+  });
+
+  it('ignores session files with invalid IDs', async () => {
+    const workspaceRoot = await makeWorkspace();
+    const dir = path.join(workspaceRoot, '.harness', 'sessions');
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, '../escaped.jsonl'), 'malicious\n');
+    await fs.writeFile(path.join(dir, 'nested-id.jsonl'), '');
+    await fs.writeFile(path.join(dir, 'bad%id.jsonl'), '');
+    expect(await listSessions(workspaceRoot)).toEqual(['nested-id']);
   });
 });
 

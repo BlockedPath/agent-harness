@@ -162,7 +162,10 @@ async function streamTurn(options: RunTurnOptions, request: Parameters<LlmProvid
     }
   }
 }
-function riskForApproval(tool: ToolDefinitionFull, input: unknown): RiskLevel { return tool.name === 'run_command' ? classifyCommand((input as { command?: string }).command ?? '') : tool.risk; }
+function riskForApproval(tool: ToolDefinitionFull, input: unknown): RiskLevel {
+  if (tool.riskForApproval) return tool.riskForApproval(input);
+  return tool.name === 'run_command' ? classifyCommand((input as { command?: string }).command ?? '') : tool.risk;
+}
 function replaceLiteralOnce(content: string, oldString: string, newString: string): string { return content.replace(oldString, () => newString); }
 
 export async function previewDiff(toolName: string, input: unknown, workspaceRoot: string): Promise<string | undefined> {
