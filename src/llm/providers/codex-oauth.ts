@@ -185,7 +185,13 @@ async function* parseResponsesStream(body: ReadableStream<Uint8Array>): AsyncIte
 function* parseSseEvent(event: string): Iterable<StreamChunk> {
   const data = event.split('\n').filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trim()).join('\n');
   if (!data || data === '[DONE]') return;
-  const parsed = JSON.parse(data) as Record<string, unknown>;
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(data) as Record<string, unknown>;
+  } catch (error) {
+    console.warn('[codex-oauth] Skipping malformed SSE frame:', error instanceof Error ? error.message : String(error));
+    return;
+  }
   const type = typeof parsed.type === 'string' ? parsed.type : '';
 
   if (type === 'response.output_text.delta' && typeof parsed.delta === 'string') yield { type: 'content', content: parsed.delta };

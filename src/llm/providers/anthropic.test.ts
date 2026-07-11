@@ -63,6 +63,14 @@ describe('normalizeAnthropicStream', () => {
 });
 
 describe('toAnthropicMessage', () => {
+  it('fails loudly instead of replaying malformed tool arguments as an empty object', () => {
+    const message: ChatMessage = {
+      role: 'assistant', content: '',
+      toolCalls: [{ id: 'toolu_bad', type: 'function', function: { name: 'read_file', arguments: '{not-json' } }],
+    };
+    expect(() => toAnthropicMessage(message)).toThrow(/Malformed tool arguments/);
+  });
+
   it('omits the empty text block for a tool-calls-only assistant turn (FIX 2)', () => {
     const message: ChatMessage = {
       role: 'assistant',
