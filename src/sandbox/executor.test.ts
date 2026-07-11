@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sanitizeEnv } from './executor.js';
+import { runSandboxed, sanitizeEnv } from './executor.js';
 
 describe('sanitizeEnv', () => {
   it('strips API keys, tokens, and connection-string credentials', () => {
@@ -30,5 +30,22 @@ describe('sanitizeEnv', () => {
     expect(out.PATH).toBe('/usr/bin');
     expect(out.HOME).toBe('/home/x');
     expect(out.LANG).toBe('en_US.UTF-8');
+  });
+});
+
+describe('runSandboxed fail-closed behavior', () => {
+  it('refuses workspace writes when the host cannot provide sandbox isolation', async () => {
+    if (process.platform === 'darwin') return;
+    const result = await runSandboxed({ command: 'touch should-not-run', cwd: process.cwd(), workspaceRoot: process.cwd(), mode: 'workspace-write' });
+    expect(result.exitCode).toBe(-1);
+    expect(result.stderr).toContain('REFUSED');
+    expect(result.stderr).toContain('allowInsecure');
+  });
+
+  it('refuses network commands when the host cannot provide sandbox isolation', async () => {
+    if (process.platform === 'darwin') return;
+    const result = await runSandboxed({ command: 'echo should-not-run', cwd: process.cwd(), workspaceRoot: process.cwd(), mode: 'network' });
+    expect(result.exitCode).toBe(-1);
+    expect(result.stderr).toContain('network');
   });
 });

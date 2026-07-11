@@ -1,6 +1,5 @@
-import { spawn } from 'node:child_process';
-import { access } from 'node:fs/promises';
-import { constants } from 'node:fs';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { buildProfile, type SandboxMode } from './profiles.js';
 import { assertInsideWorkspace } from './workspace-boundary.js';
 
@@ -11,6 +10,8 @@ export interface RunOptions {
   mode: SandboxMode;
   timeoutMs?: number;
   outputLimit?: number;
+  /** Explicit escape hatch for hosts that knowingly accept an insecure shell. */
+  allowInsecure?: boolean;
 }
 
 export interface RunResult { exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; }
@@ -28,6 +29,11 @@ const INJECTION_ENV = new Set([
   'LD_PRELOAD', 'LD_LIBRARY_PATH', 'DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH', 'DYLD_FRAMEWORK_PATH',
 ]);
 
+const SANDBOX_AVAILABLE = process.platform === 'darwin' && existsSync('/usr/bin/sandbox-exec');
+if (!SANDBOX_AVAILABLE) {
+  console.warn('[sandbox] WARNING: sandbox-exec isolation is unavailable; write/network commands will be refused unless allowInsecure is explicitly set.');
+}
+
 export function sanitizeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(env)) {
@@ -43,14 +49,19 @@ export async function runSandboxed(options: RunOptions): Promise<RunResult> {
   const limit = options.outputLimit ?? 20_000;
   const timeoutMs = options.timeoutMs ?? 60_000;
   const profile = process.platform === 'darwin' ? buildProfile(workspaceRoot, options.mode) : null;
-  const useSandbox = profile && await sandboxExecExists();
+  const useSandbox = Boolean(profile && SANDBOX_AVAILABLE);
+  if (!useSandbox && (options.mode === 'workspace-write' || options.mode === 'network') && !options.allowInsecure) {
+    const warning = insecureSandboxWarning(options.mode);
+    console.warn(warning);
+    return { exitCode: -1, stdout: '', stderr: warning, timedOut: false };
+  }
   const command = useSandbox ? 'sandbox-exec' : '/bin/sh';
-  const args = useSandbox ? ['-p', profile, '/bin/sh', '-c', options.command] : ['-c', options.command];
+  const args: string[] = useSandbox ? ['-p', profile ?? '', '/bin/sh', '-c', options.command] : ['-c', options.command];
 
   return await new Promise((resolve) => {
     // `detached` makes the child a process-group leader so the whole tree can be
     // signalled on timeout (otherwise only the wrapping /bin/sh dies, orphaning children).
-    const child = spawn(command, args, { cwd: options.cwd, env: sanitizeEnv(process.env), detached: true });
+    const child: ChildProcess = spawn(command, args, { cwd: options.cwd, env: sanitizeEnv(process.env), detached: true });
     let stdout = '';
     let stderr = '';
     let timedOut = false;
@@ -84,6 +95,6 @@ export async function runSandboxed(options: RunOptions): Promise<RunResult> {
   });
 }
 
-async function sandboxExecExists(): Promise<boolean> {
-  try { await access('/usr/bin/sandbox-exec', constants.X_OK); return true; } catch { return false; }
+export function insecureSandboxWarning(mode: SandboxMode): string {
+  return `[sandbox] REFUSED: ${mode} commands require macOS sandbox-exec; this host cannot enforce filesystem/network isolation. Set allowInsecure explicitly only if you accept an unsandboxed shell.`;
 }
