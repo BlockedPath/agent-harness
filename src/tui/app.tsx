@@ -331,5 +331,7 @@ function buildAuthRetryNotice(providerId: string): CredentialNotice {
 export function isAuthError(error: unknown): boolean {
   if (error instanceof CodexAuthError) return true;
   const message = error instanceof Error ? error.message : String(error);
-  return /credential|sign in|log ?in|authenticat|token has been invalidated|missing .* token/i.test(message);
+  // Only recognize messages emitted by the Codex/ChatGPT auth flow. Generic
+  // tool errors often contain words such as "login" or "token" incidentally.
+  return /\b(?:codex|chatgpt)\b.*(?:credential|oauth|sign\s*in|log\s*in|authenticat|token)|authentication token has been invalidated/i.test(message);
 }

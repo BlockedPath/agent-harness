@@ -141,6 +141,27 @@ describe('CodexOAuthProvider', () => {
 
     expect(toolCalls).toEqual([{ id: 'call_1', name: 'search_files', arguments: '{"pattern":"todo"}' }]);
   });
+
+  it('skips malformed SSE frames and continues parsing later events', async () => {
+    const events = [
+      'data: {not-json}\n\n',
+      'data: {"type":"response.output_text.delta","delta":"still alive"}\n\n',
+    ];
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const event of events) controller.enqueue(new TextEncoder().encode(event));
+          controller.close();
+        },
+      }),
+    })));
+    const provider = new CodexOAuthProvider({ accessToken: 'token' });
+    const stream = await provider.stream({ model: 'gpt-5.5', messages: [], tools: [] });
+    const chunks = [];
+    for await (const chunk of stream) chunks.push(chunk);
+    expect(chunks).toEqual([{ type: 'content', content: 'still alive' }]);
+  });
 });
 
 function authFile(accessToken: string, lastRefresh: string): Record<string, unknown> {
