@@ -61,7 +61,7 @@ export function toAnthropicMessage(message: ChatMessage): Anthropic.MessageParam
     return { role: 'user', content: [{ type: 'tool_result', tool_use_id: message.toolCallId ?? '', content: message.content }] };
   }
   if (message.toolCalls?.length) {
-    const toolUses = message.toolCalls.map((call) => ({ type: 'tool_use' as const, id: call.id, name: call.function.name, input: safeJson(call.function.arguments) }));
+    const toolUses = message.toolCalls.map((call) => ({ type: 'tool_use' as const, id: call.id, name: call.function.name, input: parseToolArguments(call.function.arguments) }));
     return { role: 'assistant', content: [...(message.content ? [{ type: 'text' as const, text: message.content }] : []), ...toolUses] };
   }
   return { role: message.role === 'assistant' ? 'assistant' : 'user', content: message.content };
@@ -91,6 +91,9 @@ export function coalesceToolResults(messages: Anthropic.MessageParam[]): Anthrop
   return result;
 }
 
-function safeJson(input: string): unknown {
-  try { return JSON.parse(input || '{}'); } catch { return {}; }
+function parseToolArguments(input: string): unknown {
+  try { return JSON.parse(input); } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Malformed tool arguments for Anthropic replay: ${detail}`, { cause: error });
+  }
 }

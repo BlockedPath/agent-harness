@@ -83,6 +83,10 @@ export async function runSandboxed(options: RunOptions): Promise<RunResult> {
     };
     const timer = setTimeout(() => {
       timedOut = true;
+      // This kills the detached process group, but a child that calls setsid
+      // creates a new session/process group and can outlive the tool timeout.
+      // Full descendant tracking requires stronger host isolation (for example
+      // cgroups); callers must not treat timeout as proof every descendant died.
       killTree('SIGTERM');
       killTimer = setTimeout(() => killTree('SIGKILL'), 2_000);
     }, timeoutMs);

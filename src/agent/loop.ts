@@ -20,7 +20,7 @@ export interface RunTurnOptions {
   session: Session;
   provider: LlmProvider;
   tools: ToolDefinitionFull[];
-  config: { permissions: PermissionConfig; maxIterations?: number; compaction?: CompactionConfig; retryBackoffMs?: number[] };
+  config: { permissions: PermissionConfig; maxIterations?: number; compaction?: CompactionConfig; retryBackoffMs?: number[]; streamIdleTimeoutMs?: number };
   onEvent: (event: AgentEvent) => void;
   userMessage?: string;
   /** Set false when the caller already appended this user turn (for example, an auth retry). */
@@ -147,7 +147,7 @@ async function ensureToolResultsPaired(options: RunTurnOptions): Promise<void> {
     if (!answered.has(call.id)) await pushToolResult(options, call.id, { ok: false, output: '', error: 'Turn aborted before tool result was produced.' });
   }
 }
-async function pushToolResult(options: RunTurnOptions, toolCallId: string, result: ToolResult): Promise<void> { const message: ChatMessage = { role: 'tool', toolCallId, content: result.ok ? result.output : `${result.error ?? 'error'}\n${result.output}` }; options.session.messages.push(message); await appendMessage(options.session.workspaceRoot, options.session.id, message); }
+async function pushToolResult(options: RunTurnOptions, toolCallId: string, result: ToolResult): Promise<void> { const message = truncateToolContent({ role: 'tool', toolCallId, content: result.ok ? result.output : `${result.error ?? 'error'}\n${result.output}` }); options.session.messages.push(message); await appendMessage(options.session.workspaceRoot, options.session.id, message); }
 async function streamTurn(options: RunTurnOptions, request: Parameters<LlmProvider['stream']>[0], backoff: readonly number[]): Promise<AggregatedStream> {
   let streamed = false;
   for (let attempt = 0; ; attempt++) {
@@ -157,6 +157,7 @@ async function streamTurn(options: RunTurnOptions, request: Parameters<LlmProvid
         stream,
         (text) => { streamed = true; options.onEvent({ type: 'content', text }); },
         (delta) => { streamed = true; options.onEvent({ type: 'tool-call-delta', toolCallId: delta.id, name: delta.name, partialArgs: delta.partialArgs }); },
+        options.config.streamIdleTimeoutMs,
       );
     } catch (err) {
       if (streamed || !isTransientProviderError(err) || attempt >= backoff.length) throw err;

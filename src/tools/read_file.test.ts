@@ -44,4 +44,16 @@ describe('readFileTool', () => {
 
     expect(result.output).toBe('f.txt (no lines: offset 99999 is past end of file, 10 lines total)');
   });
+
+  it('stops scanning a large file after the requested page', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'harness-read-file-large-'));
+    const content = `${Array.from({ length: 200_000 }, (_, i) => `line${i}`).join('\n')}\n`;
+    await fs.writeFile(path.join(root, 'large.txt'), content);
+
+    const result = await readFileTool.run({ path: 'large.txt', offset: 2, limit: 2 }, ctx(root));
+
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain('(lines 2-3; more lines available)');
+    expect(result.output).toContain('[truncated: call read_file with offset 4 for the next page]');
+  });
 });

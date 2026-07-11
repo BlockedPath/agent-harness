@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import { trimMessages, parseArgs, previewDiff, runTurn } from './loop.js';
 import { COMPACTION_SUMMARY_PREFIX } from './compaction.js';
-import { createSession } from '../session/store.js';
+import { createSession, loadSession } from '../session/store.js';
 import { failingStreamProvider, scriptedProvider } from '../test/fake-provider.js';
 import type { ChatMessage, LlmProvider, StreamChunk } from '../llm/types.js';
 import type { AgentEvent } from './types.js';
@@ -248,6 +248,72 @@ describe('runTurn stream failure mid-turn', () => {
     expect(events.some((e) => e.type === 'content' && e.text === 'partial answer')).toBe(true);
     expect(events.some((e) => e.type === 'error' && e.message.includes('stream aborted'))).toBe(true);
     expect(events.some((e) => e.type === 'done')).toBe(true);
+  });
+});
+
+describe('runTurn provider stream idle timeout', () => {
+  it('reports a timeout and retries when no stream bytes were emitted', async () => {
+    const root = await tmpWorkspace();
+    const session = await createSession(root, 'fake', 'fake-model');
+    let calls = 0;
+    const provider: LlmProvider = {
+      id: 'fake', name: 'Fake',
+      async stream() {
+        calls++;
+        if (calls === 1) {
+          return (async function* () {
+            await new Promise(() => {});
+            yield { type: 'content', content: 'unreachable' } as StreamChunk;
+          })();
+        }
+        return (async function* () { yield { type: 'content', content: 'ok' } as StreamChunk; })();
+      },
+    };
+    const events: AgentEvent[] = [];
+    await runTurn({ session, provider, tools: [], config: { permissions: autoPerms, retryBackoffMs: [0], streamIdleTimeoutMs: 5 }, onEvent: (e) => events.push(e), userMessage: 'go' });
+    expect(calls).toBe(2);
+    expect(session.messages.at(-1)).toMatchObject({ role: 'assistant', content: 'ok' });
+    expect(events.some((e) => e.type === 'error')).toBe(false);
+  });
+
+  it('does not retry after a chunk has streamed', async () => {
+    const root = await tmpWorkspace();
+    const session = await createSession(root, 'fake', 'fake-model');
+    let calls = 0;
+    const provider: LlmProvider = {
+      id: 'fake', name: 'Fake',
+      async stream() {
+        calls++;
+        return (async function* () { yield { type: 'content', content: 'partial' } as StreamChunk; await new Promise(() => {}); })();
+      },
+    };
+    const events: AgentEvent[] = [];
+    await runTurn({ session, provider, tools: [], config: { permissions: autoPerms, retryBackoffMs: [0], streamIdleTimeoutMs: 5 }, onEvent: (e) => events.push(e), userMessage: 'go' });
+    expect(calls).toBe(1);
+    expect(events.some((e) => e.type === 'error' && e.message === 'provider stream timed out')).toBe(true);
+  });
+});
+
+describe('runTurn persisted tool result truncation', () => {
+  it('persists the provider-sized tool result so resume does not reload the full output', async () => {
+    const root = await tmpWorkspace();
+    const session = await createSession(root, 'fake', 'fake-model');
+    const largeTool: ToolDefinitionFull<Record<string, never>> = {
+      name: 'large', description: 'large output', parameters: z.object({}), risk: 'read',
+      async run() { return { ok: true, output: 'x'.repeat(5000) }; },
+    };
+    const provider = scriptedProvider([
+      [{ type: 'tool_call', toolCall: { id: 'large-1', name: 'large', arguments: '{}' } }],
+      [{ type: 'content', content: 'done' }],
+    ]);
+    await runTurn({ session, provider, tools: [largeTool], config: { permissions: autoPerms }, onEvent: () => {}, userMessage: 'go' });
+    const toolResult = session.messages.find((message) => message.role === 'tool');
+    expect(toolResult?.content).toContain('[trimmed 1000 bytes]');
+    expect(toolResult?.content.length).toBeLessThan(4100);
+    const resumed = await loadSession(root, session.id);
+    const resumedTool = resumed.messages.find((message) => message.role === 'tool');
+    expect(resumedTool?.content).toBe(toolResult?.content);
+    expect(resumedTool?.content.length).toBeLessThan(4100);
   });
 });
 

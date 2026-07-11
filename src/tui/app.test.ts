@@ -10,12 +10,14 @@ describe('isAuthError', () => {
   it('detects auth-shaped error messages', () => {
     expect(isAuthError(new Error('Your authentication token has been invalidated.'))).toBe(true);
     expect(isAuthError(new Error('Missing Codex OAuth credentials. Run Codex login first.'))).toBe(true);
-    expect(isAuthError(new Error('Please sign in again.'))).toBe(true);
+    expect(isAuthError(new Error('Codex OAuth: please sign in again.'))).toBe(true);
   });
 
   it('ignores unrelated errors', () => {
     expect(isAuthError(new Error('429 rate limited'))).toBe(false);
     expect(isAuthError(new Error('ECONNRESET'))).toBe(false);
+    expect(isAuthError(new Error('Tool failed: please login to the remote host'))).toBe(false);
+    expect(isAuthError(new Error('Please sign in again.'))).toBe(false);
     expect(isAuthError('something went wrong')).toBe(false);
   });
 });
