@@ -23,10 +23,12 @@ export interface RunTurnOptions {
   config: { permissions: PermissionConfig; maxIterations?: number; compaction?: CompactionConfig; retryBackoffMs?: number[] };
   onEvent: (event: AgentEvent) => void;
   userMessage?: string;
+  /** Set false when the caller already appended this user turn (for example, an auth retry). */
+  persistUserMessage?: boolean;
 }
 
 export async function runTurn(options: RunTurnOptions): Promise<void> {
-  if (options.userMessage) {
+  if (options.userMessage && options.persistUserMessage !== false) {
     const msg: ChatMessage = { role: 'user', content: options.userMessage };
     options.session.messages.push(msg);
     await appendMessage(options.session.workspaceRoot, options.session.id, msg);

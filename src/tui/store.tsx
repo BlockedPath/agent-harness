@@ -60,6 +60,7 @@ type Action =
   | { type: 'set-credential-notice'; notice: CredentialNotice | null }
   | { type: 'usage'; usage: { promptTokens: number; completionTokens: number; totalTokens: number } }
   | { type: 'reset' }
+  | { type: 'clear-stream' }
   | { type: 'flush-stream' };
 
 export const initialState: TuiState = {
@@ -103,7 +104,7 @@ export function reducer(state: TuiState, action: Action): TuiState {
           ? { ...card, status: 'error' as const, output: card.output ?? action.content }
           : card,
       );
-      return { ...state, messages, toolCards };
+      return { ...state, messages, toolCards, streamingText: '' };
     }
     case 'content':
       return { ...state, streamingText: state.streamingText + action.text };
@@ -153,6 +154,8 @@ export function reducer(state: TuiState, action: Action): TuiState {
       };
     case 'reset':
       return { ...initialState, credentialNotice: state.credentialNotice, screen: state.credentialNotice ? state.screen : initialState.screen };
+    case 'clear-stream':
+      return state.streamingText ? { ...state, streamingText: '' } : state;
     case 'flush-stream':
       return state.streamingText ? { ...state, messages: [...state.messages, { role: 'assistant' as const, content: state.streamingText }].slice(-200), streamingText: '' } : state;
   }

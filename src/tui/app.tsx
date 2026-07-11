@@ -67,10 +67,10 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
       });
   }, [config, providerId, dispatch]);
 
-  const runAgentTurn = useCallback((message: string) => {
+  const runAgentTurn = useCallback((message: string, persistUserMessage = true) => {
     if (!session || running.current) return;
     running.current = true;
-    dispatch({ type: 'add-message', message: { role: 'user', content: message } });
+    if (persistUserMessage) dispatch({ type: 'add-message', message: { role: 'user', content: message } });
     dispatch({ type: 'set-disabled', disabled: true });
     const routeAuthFailure = (content: string) => {
       // Auth failed mid-turn: stash the message, surface the error, and guide
@@ -91,6 +91,7 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
         tools: filterTools(ALL_TOOLS, config.tools),
         config: { permissions: config.permissions, compaction: config.compaction },
         userMessage: message,
+        persistUserMessage,
         onEvent(event) {
           if (event.type === 'content') dispatch({ type: 'content', text: event.text });
           if (event.type === 'tool-call-delta') dispatch({ type: 'tool-call-delta', id: event.toolCallId, name: event.name, partialArgs: event.partialArgs });
@@ -103,6 +104,7 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
           if (event.type === 'error') {
             if (isAuthError(event.message)) routeAuthFailure(event.message);
             else dispatch({ type: 'add-error', severity: 'provider', content: event.message });
+            if (isAuthError(event.message)) dispatch({ type: 'clear-stream' });
             dispatch({ type: 'set-disabled', disabled: false });
             running.current = false;
           }
@@ -141,7 +143,7 @@ function AppInner({ workspaceRoot, config, providerId, model, sessionId }: AppPr
         pendingRetry.current = null;
         if (retry) {
           dispatch({ type: 'add-message', message: { role: 'assistant', content: 'Re-authenticated. Retrying your last message…' } });
-          runAgentTurn(retry);
+          runAgentTurn(retry, false);
         }
       })
       .catch((error: unknown) => {

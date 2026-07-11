@@ -89,6 +89,15 @@ describe('tui reducer — errors', () => {
     const withError = reducer(initialState, { type: 'add-error', severity: 'tool', content: 'boom' });
     expect(reducer(withError, { type: 'reset' }).messages).toEqual([]);
   });
+
+  it('clears partial assistant content when a stream fails', () => {
+    const streaming = reducer(initialState, { type: 'content', text: 'partial answer' });
+    const next = reducer(streaming, { type: 'add-error', severity: 'provider', content: 'stream aborted' });
+
+    expect(next.streamingText).toBe('');
+    expect(next.messages.at(-1)).toMatchObject({ role: 'error', content: 'stream aborted' });
+    expect(reducer(next, { type: 'flush-stream' }).messages.some((message) => message.role === 'assistant' && message.content === 'partial answer')).toBe(false);
+  });
 });
 
 describe('tui reducer — add-error tool-card cleanup', () => {
