@@ -23,10 +23,12 @@ export interface RunTurnOptions {
   config: { permissions: PermissionConfig; maxIterations?: number; compaction?: CompactionConfig; retryBackoffMs?: number[] };
   onEvent: (event: AgentEvent) => void;
   userMessage?: string;
+  /** Set false when the caller already appended this user turn (for example, an auth retry). */
+  persistUserMessage?: boolean;
 }
 
 export async function runTurn(options: RunTurnOptions): Promise<void> {
-  if (options.userMessage) {
+  if (options.userMessage && options.persistUserMessage !== false) {
     const msg: ChatMessage = { role: 'user', content: options.userMessage };
     options.session.messages.push(msg);
     await appendMessage(options.session.workspaceRoot, options.session.id, msg);
@@ -162,7 +164,10 @@ async function streamTurn(options: RunTurnOptions, request: Parameters<LlmProvid
     }
   }
 }
-function riskForApproval(tool: ToolDefinitionFull, input: unknown): RiskLevel { return tool.name === 'run_command' ? classifyCommand((input as { command?: string }).command ?? '') : tool.risk; }
+function riskForApproval(tool: ToolDefinitionFull, input: unknown): RiskLevel {
+  if (tool.riskForApproval) return tool.riskForApproval(input);
+  return tool.name === 'run_command' ? classifyCommand((input as { command?: string }).command ?? '') : tool.risk;
+}
 function replaceLiteralOnce(content: string, oldString: string, newString: string): string { return content.replace(oldString, () => newString); }
 
 export async function previewDiff(toolName: string, input: unknown, workspaceRoot: string): Promise<string | undefined> {

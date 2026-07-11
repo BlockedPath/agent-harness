@@ -20,5 +20,7 @@ export interface ToolDefinitionFull<T = unknown> {
   description: string;
   parameters: z.ZodType<T>;
   risk: RiskLevel;
+  /** Override the static risk for approval decisions based on validated input. */
+  riskForApproval?(input: T): RiskLevel;
   run(input: T, ctx: ToolContext): Promise<ToolResult>;
 }

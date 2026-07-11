@@ -3,10 +3,22 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { applyPatchTool } from '../tools/apply_patch.js';
+import { requiresApproval } from '../policy/approval.js';
+import type { PermissionConfig } from '../policy/types.js';
 
 function ctx(root: string) { return { workspaceRoot: root, sessionId: 'test', emit() {} }; }
+const autoPerms: PermissionConfig = { mode: 'auto', read: 'allow', write: 'allow', execute: 'allow', network: 'allow' };
 
 describe('apply_patch tool', () => {
+  it('requires dangerous approval for deletion patches under auto mode', () => {
+    const patch = `--- a/a.txt\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-one\n`;
+    expect(applyPatchTool.riskForApproval?.({ patch })).toBe('dangerous');
+    expect(requiresApproval(applyPatchTool.riskForApproval?.({ patch }) ?? applyPatchTool.risk, autoPerms)).toBe(true);
+    const writePatch = `--- a/a.txt\n+++ b/a.txt\n@@ -1,1 +1,1 @@\n-one\n+two\n`;
+    expect(applyPatchTool.riskForApproval?.({ patch: writePatch })).toBe('write');
+    expect(requiresApproval(applyPatchTool.riskForApproval?.({ patch: writePatch }) ?? applyPatchTool.risk, autoPerms)).toBe(false);
+  });
+
   it('applies a valid unified diff', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-patch-'));
     fs.writeFileSync(path.join(root, 'a.txt'), 'one\n');

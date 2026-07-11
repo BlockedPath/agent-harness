@@ -4,7 +4,7 @@ import { applyPatch, parsePatch } from 'diff';
 import { z } from 'zod';
 import { resolveWorkspacePath } from '../sandbox/workspace-boundary.js';
 import { snapshotFile } from '../workspace/snapshot.js';
-import type { ToolDefinitionFull } from './types.js';
+import type { RiskLevel, ToolDefinitionFull } from './types.js';
 
 const schema = z.object({ patch: z.string() });
 
@@ -17,6 +17,15 @@ export const applyPatchTool: ToolDefinitionFull<z.infer<typeof schema>> = {
   description: 'Apply a unified diff patch to files in the workspace (supports deletions via /dev/null).',
   parameters: schema,
   risk: 'write',
+  riskForApproval(input): RiskLevel {
+    try {
+      return parsePatch(input.patch).some(isDeletion) ? 'dangerous' : 'write';
+    } catch {
+      // The tool will report malformed patches when run; do not grant a
+      // dangerous approval based on an unparseable preview.
+      return 'write';
+    }
+  },
   async run(input, ctx) {
     const parsed = parsePatch(input.patch);
     if (!parsed.length) return { ok: false, output: '', error: 'Patch did not contain any files.' };

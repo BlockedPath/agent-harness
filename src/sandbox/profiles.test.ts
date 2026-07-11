@@ -5,8 +5,17 @@ import { buildProfile } from './profiles.js';
 describe('buildProfile', () => {
   const home = os.homedir();
 
-  it('returns null for dangerous mode (no sandbox)', () => {
+  it('keeps dangerous mode as the explicit unsandboxed opt-in', () => {
     expect(buildProfile('/tmp/ws', 'dangerous')).toBeNull();
+  });
+
+  it('provides a network profile without disabling isolation', () => {
+    const profile = buildProfile('/tmp/ws', 'network')!;
+    expect(profile).not.toBeNull();
+    expect(profile).toContain('(allow network*)');
+    expect(profile).not.toContain('(deny network*)');
+    expect(profile).not.toContain('(allow file-read*)');
+    expect(profile).toContain('(deny file-read* (subpath');
   });
 
   it('denies known credential stores in workspace-write mode', () => {
@@ -30,6 +39,7 @@ describe('buildProfile', () => {
     expect(profile).toContain('(allow file-write* (subpath "/tmp/ws"))');
     expect(profile).toContain('(deny file-write* (subpath "/tmp/ws/.harness/snapshots"))');
     expect(profile).toContain('(deny network*)');
+    expect(profile).not.toContain('(allow file-read*)');
   });
 
   it('read-only mode denies all writes but keeps the secret denies', () => {
