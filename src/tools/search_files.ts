@@ -15,7 +15,10 @@ export const searchFilesTool: ToolDefinitionFull<z.infer<typeof schema>> = {
   async run(input, ctx) {
     const target = resolveWorkspacePath(ctx.workspaceRoot, input.path ?? '.');
     const hasRg = await commandExists('rg');
-    const args = hasRg ? ['--json', '-n', '-C', '2', input.pattern, target] : ['-r', '-n', input.pattern, target];
+    // Keep recursive searches from following symlinks discovered below the
+    // requested directory. The workspace-boundary check covers the root, but
+    // a nested symlink can otherwise expose files outside it.
+    const args = hasRg ? ['--no-follow', '--json', '-n', '-C', '2', input.pattern, target] : ['-r', '-n', input.pattern, target];
     const result = await collect(hasRg ? 'rg' : 'grep', args, ctx.workspaceRoot);
     return { ok: result.exitCode === 0 || result.exitCode === 1, output: result.output.split(/\r?\n/).slice(0, 200).join('\n') };
   },
@@ -44,10 +47,13 @@ function collect(command: string, args: string[], cwd: string): Promise<{ exitCo
     const append = (chunk: Buffer) => {
       if (truncated) return;
       const remaining = MAX_OUTPUT_BYTES - Buffer.byteLength(output);
+      const marker = '\n[truncated]';
       if (chunk.byteLength <= remaining) output += chunk.toString();
       else {
-        output += chunk.subarray(0, Math.max(0, remaining)).toString();
-        output += '\n[truncated]';
+        // The cap applies to the complete response, including its marker.
+        const contentBytes = Math.max(0, remaining - Buffer.byteLength(marker));
+        output += chunk.subarray(0, contentBytes).toString();
+        output += marker.slice(0, Math.max(0, remaining - contentBytes));
         truncated = true;
         child.kill('SIGTERM');
       }

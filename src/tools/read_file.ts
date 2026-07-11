@@ -1,4 +1,5 @@
 import { createReadStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import readline from 'node:readline';
 import path from 'node:path';
 import { z } from 'zod';
@@ -7,6 +8,10 @@ import type { ToolDefinitionFull } from './types.js';
 
 const schema = z.object({ path: z.string(), offset: z.number().int().positive().optional(), limit: z.number().int().positive().max(500).optional() });
 const MAX_SCAN_BYTES = 64 * 1024 * 1024;
+// For small files we retain the exact total-line count in the response. For
+// large files, stop once the requested page is collected; this avoids walking
+// a multi-gigabyte file just to calculate a cosmetic total.
+const EXACT_TOTAL_MAX_BYTES = 1024 * 1024;
 
 export const readFileTool: ToolDefinitionFull<z.infer<typeof schema>> = {
   name: 'read_file',
@@ -21,7 +26,10 @@ export const readFileTool: ToolDefinitionFull<z.infer<typeof schema>> = {
     let total = 0;
     let bytes = 0;
     let exceeded = false;
+    let totalKnown = true;
     try {
+      const fileSize = (await stat(abs)).size;
+      const exactTotal = fileSize <= EXACT_TOTAL_MAX_BYTES;
       const stream = createReadStream(abs, { encoding: 'utf8' });
       stream.on('data', (chunk: string) => {
         bytes += Buffer.byteLength(chunk);
@@ -39,6 +47,12 @@ export const readFileTool: ToolDefinitionFull<z.infer<typeof schema>> = {
         }
         total++;
         if (total >= offset && selected.length < limit) selected.push(line);
+        if (!exactTotal && selected.length >= limit) {
+          totalKnown = false;
+          lines.close();
+          stream.destroy();
+          break;
+        }
       }
       if (exceeded) return { ok: false, output: '', error: `File exceeds the ${MAX_SCAN_BYTES} byte read limit.` };
     } catch (error) {
@@ -53,6 +67,15 @@ export const readFileTool: ToolDefinitionFull<z.infer<typeof schema>> = {
 
     if (slice.length === 0) {
       return { ok: true, output: `${rel} (no lines: offset ${offset} is past end of file, ${total} lines total)` };
+    }
+
+    if (!totalKnown) {
+      const width = String(end).length;
+      const numbered = slice.map((line, i) => `${String(offset + i).padStart(width)}| ${line}`).join('\n');
+      return {
+        ok: true,
+        output: `${rel} (lines ${start}-${end}; more lines available)\n${numbered}\n[truncated: call read_file with offset ${end + 1} for the next page]`,
+      };
     }
 
     const width = String(total).length;
